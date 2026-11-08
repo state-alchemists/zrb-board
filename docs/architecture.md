@@ -118,6 +118,12 @@ happen. The first version had neither rule, so a drag that began in the margin
 did nothing at all, which reads as a broken tool rather than a considered
 refusal.
 
+The pointer trail is kept in screen pixels and turned into fractions only when
+it is needed, against the block's box at that moment. A mermaid fence that
+finishes painting mid-drag moves every paragraph below it, and coordinates
+measured against the box from before the reflow stranded the mark a hundred
+pixels from the finger.
+
 ## 7. The nudge is a trigger, not a queue
 
 The "mark for next message" button appends a line to `.board/inbox.md` and nothing

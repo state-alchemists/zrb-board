@@ -342,16 +342,35 @@ async function saveInk(blockId, strokes, author = OWNER) {
 
 /* --- drawing ------------------------------------------------------------ */
 
+/* The block's box right now. A drag can straddle a reflow — a mermaid fence
+   that finishes painting, an image that lands — so the rect taken on
+   pointerdown is only a fallback: coordinates are worked out against where the
+   paragraph actually is at the moment they are needed. */
+function liveRect(blockId, fallback) {
+  const node = document.querySelector(`[data-block="${blockId}"]`);
+  return node ? node.getBoundingClientRect() : fallback;
+}
+
+/* The shape being drawn, as fractions of its block. The pointer trail is kept
+   in client pixels and normalised here, so a reflow during the drag moves the
+   mark with its paragraph instead of stranding it where the paragraph used to
+   be. */
 function draftShape() {
+  const rect = liveRect(draft.blockId, draft.rect);
   if (draft.tool === 'pen') {
-    return { tool: 'pen', points: draft.points, color: INK_COLOUR, width: INK_WIDTH };
+    const points = draft.trail.map((point) => toNormalized(point, rect));
+    return { tool: 'pen', points, color: INK_COLOUR, width: INK_WIDTH };
   }
-  return { tool: draft.tool, from: draft.from, to: draft.to, color: INK_COLOUR, width: INK_WIDTH };
+  const from = toNormalized(draft.trail[0], rect);
+  const to = toNormalized(draft.trail[draft.trail.length - 1], rect);
+  return { tool: draft.tool, from, to, color: INK_COLOUR, width: INK_WIDTH };
 }
 
 function previewMark() {
   if (preview) preview.remove();
-  preview = shapeElement(draftShape(), draft.rect, ink().getBoundingClientRect());
+  sizeInk();
+  const rect = liveRect(draft.blockId, draft.rect);
+  preview = shapeElement(draftShape(), rect, ink().getBoundingClientRect());
   ink().appendChild(preview);
 }
 
@@ -364,9 +383,8 @@ function beginMark(event) {
   const block = blockUnder(event.clientX, event.clientY);
   if (!block) return;
   const rect = block.getBoundingClientRect();
-  const point = toNormalized({ x: event.clientX, y: event.clientY }, rect);
   if (state.tool === 'text') {
-    openTextCompose(block.dataset.block, point, event);
+    openTextCompose(block.dataset.block, toNormalized({ x: event.clientX, y: event.clientY }, rect), event);
     return;
   }
   ink().setPointerCapture(event.pointerId);
@@ -374,18 +392,14 @@ function beginMark(event) {
     tool: state.tool,
     blockId: block.dataset.block,
     rect,
-    points: [point],
-    from: point,
-    to: point,
+    trail: [{ x: event.clientX, y: event.clientY }],
   };
   previewMark();
 }
 
 function extendMark(event) {
   if (!draft) return;
-  const point = toNormalized({ x: event.clientX, y: event.clientY }, draft.rect);
-  if (draft.tool === 'pen') draft.points.push(point);
-  else draft.to = point;
+  draft.trail.push({ x: event.clientX, y: event.clientY });
   previewMark();
 }
 
