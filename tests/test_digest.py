@@ -1,0 +1,40 @@
+from board import digest
+
+
+def _note(quote: str, author: str = "tara", block: str = "b_1") -> dict:
+    return {
+        "id": "a1",
+        "block": block,
+        "quote": quote,
+        "note": "this is the part I would argue with",
+        "author": author,
+        "resolved": False,
+    }
+
+
+def test_should_place_the_note_after_the_line_it_quotes(store):
+    doc = store.create("0001-question", "# Q\n\nalpha\n\nbeta\n")
+    text = digest.build_digest(doc, [_note("beta")])
+    lines = text.splitlines()
+    quoted = lines.index("beta")
+    assert lines[quoted + 1] == ""
+    assert "⟦a1 · tara" in lines[quoted + 2]
+
+
+def test_should_list_an_unplaceable_note_instead_of_guessing(store):
+    doc = store.create("0001-question", "# Q\n\nalpha\n")
+    text = digest.build_digest(doc, [_note("text that is gone")])
+    assert "## unplaced annotations" in text
+    assert "text that is gone" not in text.split("## unplaced")[0]
+
+
+def test_should_mark_a_resolved_note(store):
+    doc = store.create("0001-question", "# Q\n\nalpha\n")
+    note = {**_note("alpha"), "resolved": True}
+    assert "resolved" in digest.build_digest(doc, [note])
+
+
+def test_should_count_the_annotations_in_the_header(store):
+    doc = store.create("0001-question", "# Q\n\nalpha\n")
+    text = digest.build_digest(doc, [_note("alpha"), _note("alpha")])
+    assert "2 annotation(s)" in text

@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>board</title>
+    <link rel="stylesheet" href="/static/board.css" />
+  </head>
+  <body>
+    <header class="top">
+      <a href="/">board</a>
+      <span class="rev" id="rev"></span>
+      <span class="spacer"></span>
+      <button id="notify" type="button">mark for Tara</button>
+      <button id="edit" type="button">edit</button>
+      <button id="save" type="button">save</button>
+    </header>
+
+    <div id="banner"></div>
+
+    <div id="layout">
+      <div>
+        <article id="article"></article>
+        <textarea id="editor" spellcheck="false"></textarea>
+      </div>
+      <aside id="rail">
+        <div id="orphans"></div>
+      </aside>
+    </div>
+
+    <div id="compose">
+      <textarea placeholder="what do you want to say about this?"></textarea>
+      <div class="row">
+        <button id="compose-cancel" type="button">cancel</button>
+        <button id="compose-save" type="button">note it</button>
+      </div>
+    </div>
+
+    <div id="toast"></div>
+    <script src="/static/board.js"></script>
+  </body>
+</html>

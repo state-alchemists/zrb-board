@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>board</title>
+    <link rel="stylesheet" href="/static/board.css" />
+  </head>
+  <body>
+    <header class="top"><a href="/">board</a><span class="spacer"></span></header>
+    <main id="docs">
+      <h1>open questions</h1>
+      <ul id="docs-list"></ul>
+    </main>
+    <script>
+      function entry(doc) {
+        const item = document.createElement('li');
+        const link = document.createElement('a');
+        link.href = `/d/${encodeURIComponent(doc.name)}`;
+        link.textContent = doc.title;
+        const open = doc.annotations.filter((note) => !note.resolved).length;
+        const facts = document.createElement('small');
+        facts.textContent = ` · rev ${doc.rev} · ${open} open note(s)`;
+        item.append(link, facts);
+        return item;
+      }
+
+      fetch('/api/docs')
+        .then((response) => response.json())
+        .then(({ docs }) => {
+          document.querySelector('#docs-list').append(...docs.map(entry));
+        });
+    </script>
+  </body>
+</html>

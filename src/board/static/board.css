@@ -1,0 +1,277 @@
+"""Board pages, styles and the script that places annotations in the margin."""
+
+body {
+  margin: 0;
+  font: 16px/1.65 -apple-system, "Iowan Old Style", Georgia, serif;
+  color: #14161a;
+  background: #fbfaf7;
+}
+
+header.top {
+  display: flex;
+  gap: 1rem;
+  align-items: baseline;
+  padding: 0.85rem 1.5rem;
+  border-bottom: 1px solid #e4e0d8;
+  background: #fbfaf7;
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: 0.85rem;
+}
+
+header.top a {
+  color: #6b6257;
+  text-decoration: none;
+}
+
+header.top .rev {
+  color: #a2988a;
+  font-variant-numeric: tabular-nums;
+}
+
+header.top .spacer {
+  flex: 1;
+}
+
+button {
+  font: inherit;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: 0.85rem;
+  padding: 0.35rem 0.8rem;
+  border: 1px solid #d8d2c6;
+  border-radius: 6px;
+  background: #fff;
+  color: #14161a;
+  cursor: pointer;
+}
+
+button:hover {
+  background: #f2eee6;
+}
+
+#layout {
+  display: grid;
+  grid-template-columns: minmax(0, 44rem) 22rem;
+  gap: 3rem;
+  padding: 2.5rem 1.5rem 8rem;
+  justify-content: center;
+  align-items: start;
+}
+
+#article {
+  position: relative;
+}
+
+#article h1 {
+  font-size: 1.9rem;
+  line-height: 1.25;
+  margin: 0 0 1.5rem;
+}
+
+#article h2 {
+  font-size: 1.25rem;
+  margin: 2rem 0 0.75rem;
+}
+
+#article p {
+  margin: 0 0 1rem;
+}
+
+#article blockquote {
+  margin: 0 0 1rem;
+  padding-left: 1rem;
+  border-left: 3px solid #e0d9cd;
+  color: #4a443c;
+}
+
+#article pre {
+  overflow-x: auto;
+  padding: 0.85rem 1rem;
+  background: #f3efe7;
+  border-radius: 8px;
+  font-size: 0.85rem;
+}
+
+#article code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+#article .block {
+  position: relative;
+  scroll-margin-top: 4rem;
+}
+
+#article .block.annotated {
+  background: linear-gradient(transparent 92%, #f6e6b8 92%);
+}
+
+#rail {
+  position: relative;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: 0.85rem;
+  min-height: 10rem;
+}
+
+.card {
+  position: absolute;
+  left: 0;
+  right: 0;
+  padding: 0.7rem 0.85rem;
+  border: 1px solid #e4e0d8;
+  border-left: 3px solid #d8b45a;
+  border-radius: 6px;
+  background: #fffdf8;
+  box-shadow: 0 1px 2px rgb(20 22 26 / 6%);
+}
+
+.card.orphaned {
+  position: static;
+  margin-bottom: 0.75rem;
+  border-left-color: #c96a4a;
+  opacity: 0.85;
+}
+
+.card .meta {
+  color: #a2988a;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 0.25rem;
+}
+
+.card .quote {
+  display: block;
+  color: #6b6257;
+  border-left: 2px solid #eee8db;
+  padding-left: 0.5rem;
+  margin-bottom: 0.4rem;
+  font-style: italic;
+}
+
+.card .note {
+  white-space: pre-wrap;
+}
+
+.card button {
+  margin-top: 0.5rem;
+  padding: 0.15rem 0.5rem;
+  font-size: 0.75rem;
+}
+
+#orphans {
+  margin-top: 1.5rem;
+  padding-top: 0.75rem;
+  border-top: 1px dashed #e4e0d8;
+}
+
+#orphans h3 {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #c96a4a;
+  margin: 0 0 0.6rem;
+}
+
+#editor {
+  display: none;
+  font: 0.85rem/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
+  width: 100%;
+  min-height: 60vh;
+  padding: 1rem;
+  border: 1px solid #d8d2c6;
+  border-radius: 8px;
+  background: #fff;
+  box-sizing: border-box;
+}
+
+body.editing #article,
+body.editing #rail {
+  display: none;
+}
+
+body.editing #editor {
+  display: block;
+}
+
+#banner {
+  display: none;
+  margin: 0 0 1rem;
+  padding: 0.6rem 0.85rem;
+  border: 1px solid #e2b9a8;
+  border-radius: 6px;
+  background: #fdf1ec;
+  color: #8a3f28;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: 0.85rem;
+}
+
+#banner.visible {
+  display: block;
+}
+
+#compose {
+  position: absolute;
+  z-index: 30;
+  display: none;
+  width: 18rem;
+  padding: 0.6rem;
+  border: 1px solid #d8d2c6;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 6px 20px rgb(20 22 26 / 12%);
+  font-family: ui-sans-serif, system-ui, sans-serif;
+}
+
+#compose.visible {
+  display: block;
+}
+
+#compose textarea {
+  width: 100%;
+  min-height: 5rem;
+  box-sizing: border-box;
+  font: inherit;
+  border: 1px solid #e4e0d8;
+  border-radius: 6px;
+  padding: 0.45rem;
+  resize: vertical;
+}
+
+#compose .row {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+  margin-top: 0.5rem;
+}
+
+#docs {
+  max-width: 44rem;
+  margin: 0 auto;
+  padding: 2.5rem 1.5rem;
+}
+
+#docs li {
+  margin-bottom: 0.5rem;
+}
+
+#toast {
+  position: fixed;
+  bottom: 1.25rem;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 0.5rem 0.9rem;
+  border-radius: 6px;
+  background: #14161a;
+  color: #fbfaf7;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: 0.85rem;
+  opacity: 0;
+  transition: opacity 0.2s;
+  pointer-events: none;
+}
+
+#toast.visible {
+  opacity: 1;
+}
