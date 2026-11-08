@@ -156,6 +156,13 @@ def _register_routes(app: FastAPI, store: Store) -> None:
         except DocNotFound:
             raise _not_found(annotation_id) from None
 
+    @app.delete("/api/docs/{name}/annotations/{annotation_id}")
+    def remove_annotation(name: str, annotation_id: str) -> dict:
+        try:
+            return store.remove_annotation(name, annotation_id)
+        except DocNotFound:
+            raise _not_found(annotation_id) from None
+
     @app.put("/api/docs/{name}/ink/{block}")
     def draw_on_block(name: str, block: str, body: InkBody) -> dict:
         try:

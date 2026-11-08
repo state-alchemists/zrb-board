@@ -104,12 +104,27 @@ async function renderDiagrams() {
       const holder = document.createElement('figure');
       holder.className = 'diagram';
       holder.innerHTML = svg;
+      naturalSize(holder);
       host.replaceWith(holder);
     } catch (error) {
       host.classList.add('diagram-failed');
       host.title = String(error);
     }
   }
+}
+
+/* Mermaid hands the page a diagram that may be three times wider than the
+   column and asks to be scaled into it, which turns a wide flowchart into a
+   grey smudge at a third of its size. The figure scrolls instead, so a diagram
+   keeps the size it was drawn at and the words in it stay words. */
+function naturalSize(holder) {
+  const svg = holder.querySelector('svg');
+  const box = svg && svg.viewBox && svg.viewBox.baseVal;
+  if (!box || !box.width || !box.height) return;
+  svg.removeAttribute('height');
+  svg.setAttribute('width', box.width);
+  svg.setAttribute('height', box.height);
+  svg.style.maxWidth = 'none';
 }
 
 function placeCards(annotations) {
@@ -186,6 +201,14 @@ function renderOrphans(container, annotations) {
   for (const annotation of annotations) {
     const card = buildCard(annotation);
     card.classList.add('orphaned');
+    /* An orphan has nothing left to be resolved against, so the only useful
+       thing to offer is getting rid of it — otherwise it waits for the person
+       who wrote it to ask someone else to clear it by hand. */
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.textContent = 'remove';
+    remove.addEventListener('click', () => removeAnnotation(annotation.id));
+    card.appendChild(remove);
     container.appendChild(card);
   }
 }
@@ -342,6 +365,11 @@ async function saveInk(blockId, strokes, author = OWNER) {
     method: 'PUT',
     body: JSON.stringify({ quote, strokes, author }),
   });
+  await load();
+}
+
+async function removeAnnotation(annotationId) {
+  await request(`/api/docs/${state.name}/annotations/${annotationId}`, { method: 'DELETE' });
   await load();
 }
 

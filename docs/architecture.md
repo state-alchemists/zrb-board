@@ -73,6 +73,11 @@ The orphan case is the point. A rule that quietly places a note near where it
 used to be is worse than no rule, because it makes a wrong sentence look
 deliberate.
 
+An orphan has nothing left to be resolved against, so it is the one card that
+offers to be removed. Resolving is for a note that still points somewhere;
+removal is for a note whose paragraph an edit took away, and the two are not
+the same gesture.
+
 *Rejected:* character offsets into the whole document. They survive nothing —
 one inserted paragraph above invalidates every note below it.
 
@@ -178,6 +183,7 @@ chat — where the work actually happens — has no address to push to.
 | `PUT /api/docs/{name}` | `{markdown, rev}` → `{rev}` or `409 {rev, markdown}` |
 | `POST /api/docs/{name}/annotations` | `{block, quote, note, author, start, end}` |
 | `POST /api/docs/{name}/annotations/{id}/resolve` | close a note |
+| `DELETE /api/docs/{name}/annotations/{id}` | drop an annotation for good — what an orphan offers |
 | `PUT /api/docs/{name}/ink/{block}` | `{quote, strokes, author}` — replaces that author's ink on the block |
 | `GET`/`POST /api/inbox` | the marker |
 

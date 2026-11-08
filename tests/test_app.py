@@ -94,3 +94,22 @@ def test_should_orphan_ink_when_its_block_is_rewritten_away(client, store):
     )
     annotation = client.get("/api/docs/0001-question").json()["annotations"][0]
     assert annotation["orphaned"] is True
+
+
+def test_should_remove_an_annotation_whose_anchor_an_edit_took_away(client, store):
+    doc = store.create("0001-question", "# Q\n\ntext\n")
+    _note(client, "0001-question")
+    client.put(
+        "/api/docs/0001-question",
+        json={"markdown": "# Q\n\nrewritten\n", "rev": doc.rev},
+    )
+    lost = client.get("/api/docs/0001-question").json()["annotations"][0]
+    assert lost["orphaned"] is True
+
+    assert client.delete(f"/api/docs/0001-question/annotations/{lost['id']}").status_code == 200
+    assert client.get("/api/docs/0001-question").json()["annotations"] == []
+
+
+def test_should_answer_404_when_removing_an_annotation_that_is_not_there(client, store):
+    store.create("0001-question", "# Q\n\ntext\n")
+    assert client.delete("/api/docs/0001-question/annotations/a9").status_code == 404

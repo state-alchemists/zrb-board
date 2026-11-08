@@ -113,6 +113,24 @@ def test_should_erase_only_the_erasing_author_s_ink(store):
     assert [item["author"] for item in inks] == ["tara"]
 
 
+def test_should_remove_an_annotation_and_leave_the_others(store):
+    store.create("0001-question", "# Q\n\ntext\n")
+    first = store.add_annotation("0001-question", _note("text"))
+    store.add_annotation("0001-question", _note("Q"))
+    assert store.remove_annotation("0001-question", first["id"]) == {
+        "id": first["id"],
+        "removed": True,
+    }
+    remaining = store.annotations("0001-question")
+    assert [item["id"] for item in remaining] == ["a2"]
+
+
+def test_should_refuse_to_remove_an_annotation_that_is_not_there(store):
+    store.create("0001-question", "# Q\n\ntext\n")
+    with pytest.raises(DocNotFound):
+        store.remove_annotation("0001-question", "a9")
+
+
 def _stroke(offset: float) -> dict:
     return {"points": [{"x": offset, "y": 0.0}, {"x": offset + 0.1, "y": 0.2}], "color": "#c0392b"}
 

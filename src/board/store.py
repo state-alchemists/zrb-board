@@ -215,6 +215,20 @@ class Store:
                 return annotation
         raise DocNotFound(f"annotation {annotation_id}")
 
+    def remove_annotation(self, name: str, annotation_id: str) -> dict:
+        """Drop an annotation for good.
+
+        Resolving keeps the note on the shelf; removal is for a note whose
+        paragraph an edit took away, where there is nothing left to resolve
+        against and the card would sit in the lost-and-found for ever.
+        """
+        annotations = self.annotations(name)
+        remaining = [item for item in annotations if item["id"] != annotation_id]
+        if len(remaining) == len(annotations):
+            raise DocNotFound(f"annotation {annotation_id}")
+        self._write_annotations(name, remaining)
+        return {"id": annotation_id, "removed": True}
+
     def inbox(self) -> str:
         if not self.inbox_path.is_file():
             return ""
