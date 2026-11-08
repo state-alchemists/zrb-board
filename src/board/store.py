@@ -82,12 +82,22 @@ def _next_id(annotations: list[dict]) -> str:
 
 
 class Store:
-    """Documents and their annotations, on one filesystem root."""
+    """Documents and their annotations, on one filesystem root.
 
-    def __init__(self, root: Path) -> None:
+    The folders under the root can be named directly, because they are not
+    always `root/docs` and `root/.board`: the board keeps them in its own
+    folder, which its configuration may place anywhere.
+    """
+
+    def __init__(
+        self,
+        root: Path,
+        docs_dir: Path | None = None,
+        meta_dir: Path | None = None,
+    ) -> None:
         self.root = root
-        self.docs_dir = root / "docs"
-        self.meta_dir = root / ".board"
+        self.docs_dir = docs_dir or root / "docs"
+        self.meta_dir = meta_dir or root / ".board"
         self.inbox_path = self.meta_dir / "inbox.md"
 
     def ensure_layout(self) -> None:

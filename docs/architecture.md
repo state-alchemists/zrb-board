@@ -19,6 +19,28 @@ flowchart TD
   I -->|a zrb trigger yields a turn| T
 ```
 
+## 0. Where it lives
+
+Nothing of yours is in the checkout. A board is one folder:
+
+```
+<home>/docs      the markdown, one file per document — the truth
+<home>/.board    annotations, ink, the marker inbox — the sidecar
+```
+
+`<home>` is `$ZRB_BOARD_HOME`, `~/.zrb/board` by default, the same shape as
+zrb-avatar's `~/.zrb/avatar`; `$ZRB_BOARD_DOCS` and `$ZRB_BOARD_META` move
+either half on its own, and `$ZRB_BOARD_HOST`/`$ZRB_BOARD_PORT` say where to
+listen. The `ZRB` is read from `_ZRB_ENV_PREFIX`, the variable zrb itself takes
+its settings prefix from, so a white-labeled distribution points at its own
+names without a change here.
+
+*Rejected:* keeping the documents in `docs/` of this repository. It is the
+convenient default and it is wrong for the same reason a program should not
+write its state into its own source tree — the checkout becomes something you
+cannot `git clean`, a document edit shows up as a dirty file you did not mean
+to commit, and the same files follow you into every clone.
+
 ## 1. Markdown is the truth
 
 The document is a file. Not a database row, not a CRDT, not a canvas serial

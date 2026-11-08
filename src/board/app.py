@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import uvicorn
@@ -11,13 +10,11 @@ from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from board import anchors, digest, render
+from board import anchors, config, digest, render
 from board.render import Block
 from board.store import Doc, DocNotFound, INK_AUTHOR, RevConflict, Store
 
 STATIC_DIR = Path(__file__).parent / "static"
-DEFAULT_PORT = 8765
-LOOPBACK = "127.0.0.1"
 
 
 class WriteBody(BaseModel):
@@ -45,8 +42,8 @@ class InkBody(BaseModel):
 
 
 def default_root() -> Path:
-    configured = os.environ.get("BOARD_ROOT")
-    return Path(configured).expanduser() if configured else Path.home() / "zrb-board"
+    """Where the board lives: `$ZRB_BOARD_HOME`, `~/.zrb/board` by default."""
+    return config.home()
 
 
 def _resolved(annotation: dict, blocks: list[Block]) -> dict:
@@ -95,7 +92,12 @@ def _not_found(name: str) -> HTTPException:
 
 
 def create_app(root: Path | None = None) -> FastAPI:
-    store = Store(root or default_root())
+    if root is None:
+        store = Store(
+            config.home(), docs_dir=config.docs_dir(), meta_dir=config.meta_dir()
+        )
+    else:
+        store = Store(root)
     store.ensure_layout()
     app = FastAPI(title="zrb-board", version="0.1.0")
     _register_routes(app, store)
@@ -180,8 +182,7 @@ def _register_routes(app: FastAPI, store: Store) -> None:
 
 
 def main() -> None:
-    port = int(os.environ.get("BOARD_PORT", DEFAULT_PORT))
-    uvicorn.run(create_app(), host=LOOPBACK, port=port)
+    uvicorn.run(create_app(), host=config.host(), port=config.port())
 
 
 if __name__ == "__main__":

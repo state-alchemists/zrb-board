@@ -3,3 +3,8 @@ __pycache__/
 *.egg-info/
 .pytest_cache/
 build/
+node_modules/
+
+# A board's data belongs in $ZRB_BOARD_HOME (~/.zrb/board), not in the checkout.
+# These lines only catch someone who points the board at this repository.
+.board/

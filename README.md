@@ -19,15 +19,33 @@ python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"   # once
 .venv/bin/zrb-board                                          # http://127.0.0.1:8765
 ```
 
-`BOARD_ROOT` points the server at another directory; `BOARD_PORT` changes the
-port. It binds `127.0.0.1` only and has no authentication — it is a desk, not a
-service.
+Your documents are not in this checkout. They live in `~/.zrb/board`, the same
+shape as zrb-avatar's `~/.zrb/avatar`:
+
+```
+~/.zrb/board/docs/0001-what-…md      the markdown is the truth
+~/.zrb/board/.board/0001-….annotations.json    notes, anchored to quotes
+~/.zrb/board/.board/inbox.md         what "Mark for next message" appended
+```
+
+Every setting is an environment variable, `$ZRB_BOARD_<NAME>` — with the `ZRB`
+read from `_ZRB_ENV_PREFIX`, so a white-labeled zrb needs no code change:
+
+| Variable | Default | What it does |
+|---|---|---|
+| `ZRB_BOARD_HOME` | `~/.zrb/board` | the folder holding `docs/` and `.board/` |
+| `ZRB_BOARD_DOCS` | `<home>/docs` | the documents folder alone |
+| `ZRB_BOARD_META` | `<home>/.board` | the notes folder alone |
+| `ZRB_BOARD_HOST` | `127.0.0.1` | the address to bind |
+| `ZRB_BOARD_PORT` | `8765` | the port |
+
+It binds loopback only and has no authentication — it is a desk, not a service.
 
 ## The board
 
 ```
-docs/0001-what-does-the-board-do-that-chat-doesnt.md   the markdown is the truth
-.board/0001-....annotations.json                       notes, anchored to quotes
+~/.zrb/board/docs/0001-what-does-the-board-do-that-chat-doesnt.md   the truth
+~/.zrb/board/.board/0001-….annotations.json                          the notes beside it
 ```
 
 - One file per question. Create one by writing the file; the index picks it up.
@@ -91,7 +109,8 @@ shape itself is the argument.
 
 ## The button is a note, not a bell
 
-"Mark for next message" appends a line to `.board/inbox.md`. It cannot wake the agent —
+"Mark for next message" appends a line to `.board/inbox.md` in the board's home
+folder. It cannot wake the agent —
 the agent runs when it is spoken to. The marker waits for the next turn, and
 the convention is that the word `board` in a message means: read the inbox,
 then read the state of the open documents.
