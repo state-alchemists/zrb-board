@@ -86,7 +86,8 @@ def test_should_store_ink_against_the_block_it_was_drawn_on(client, store):
 def test_should_orphan_ink_when_its_block_is_rewritten_away(client, store):
     doc = store.create("0001-question", "# Q\n\ntext\n")
     block = client.get("/api/docs/0001-question").json()["blocks"][1]["id"]
-    client.put(f"/api/docs/0001-question/ink/{block}", json={"quote": "text", "strokes": []})
+    stroke = {"points": [{"x": 0, "y": 0}, {"x": 0.5, "y": 0.5}]}
+    client.put(f"/api/docs/0001-question/ink/{block}", json={"quote": "text", "strokes": [stroke]})
     client.put(
         "/api/docs/0001-question",
         json={"markdown": "# Q\n\nrewritten\n", "rev": doc.rev},

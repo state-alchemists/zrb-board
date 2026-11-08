@@ -82,6 +82,19 @@ def test_should_refuse_ink_on_a_document_that_is_not_there(store):
         store.set_ink("missing", "b_1", "text", [_stroke(0.0)])
 
 
+def test_should_drop_the_ink_note_when_its_last_stroke_is_erased(store):
+    store.create("0001-question", "# Q\n\ntext\n")
+    store.set_ink("0001-question", "b_1", "text", [_stroke(0.0)])
+    store.set_ink("0001-question", "b_1", "text", [])
+    assert store.annotations("0001-question") == []
+
+
+def test_should_not_create_an_ink_note_for_an_empty_erase(store):
+    store.create("0001-question", "# Q\n\ntext\n")
+    store.set_ink("0001-question", "b_1", "text", [])
+    assert store.annotations("0001-question") == []
+
+
 def _stroke(offset: float) -> dict:
     return {"points": [{"x": offset, "y": 0.0}, {"x": offset + 0.1, "y": 0.2}], "color": "#c0392b"}
 

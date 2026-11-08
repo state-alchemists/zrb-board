@@ -50,3 +50,9 @@ def test_should_describe_a_drawing_that_has_no_note(store):
     doc = store.create("0001-question", "# Q\n\nalpha\n")
     drawn = {**_note("alpha"), "note": "", "strokes": [{"points": []}]}
     assert "no note" in digest.build_digest(doc, [drawn])
+
+
+def test_should_place_a_note_whose_source_line_carries_emphasis(store):
+    doc = store.create("0001-question", "# Q\n\n**Go:** when words are not enough\n")
+    text = digest.build_digest(doc, [_note("when words are not enough")])
+    assert "## unplaced" not in text

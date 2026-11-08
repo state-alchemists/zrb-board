@@ -1,9 +1,9 @@
-import { project, toNormalized, toPath } from './coords.js';
+import { nearestStrokeIndex, toNormalized, toPath } from './coords.js';
 
 const POLL_MS = 2000;
 const INK_COLOUR = '#c0392b';
 const INK_WIDTH = 2;
-const ERASE_WIDTH = 12;
+const ERASE_TOLERANCE = 10;
 const QUOTE_LENGTH = 80;
 
 const state = { name: null, rev: null, doc: null, editing: false, drawing: false, erasing: false };
@@ -225,12 +225,18 @@ async function endStroke() {
 
 async function eraseAt(event) {
   if (!state.drawing || !state.erasing) return;
-  const path = event.target.closest('path');
-  if (!path || !path.dataset.annotation) return;
-  const annotation = state.doc.annotations.find((item) => item.id === path.dataset.annotation);
-  if (!annotation) return;
-  const strokes = annotation.strokes.filter((_, index) => String(index) !== path.dataset.index);
-  await saveInk(path.dataset.block, strokes);
+  const point = { x: event.clientX, y: event.clientY };
+  for (const annotation of state.doc.annotations) {
+    if (annotation.kind !== 'ink' || annotation.orphaned) continue;
+    const block = document.querySelector(`[data-block="${annotation.resolved_block}"]`);
+    if (!block) continue;
+    const rect = block.getBoundingClientRect();
+    const index = nearestStrokeIndex(point, annotation.strokes, rect, ERASE_TOLERANCE);
+    if (index < 0) continue;
+    const strokes = annotation.strokes.filter((_, position) => position !== index);
+    await saveInk(annotation.resolved_block, strokes);
+    return;
+  }
 }
 
 function setDrawing(drawing) {

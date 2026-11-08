@@ -4,4 +4,4 @@
 
 **Tara:** So the board should be where a question stops moving. One file per question, a position under a name, an answer below it, and closed questions moved aside rather than deleted — so the shelf keeps its dates.
 
-**Go:**
+**Go:** And it should be the place when our mind put together, when words is not enough, and probably, a little probability that become bigger as we talk, our fingers touch each other

@@ -12,6 +12,8 @@ import re
 from board.store import Doc
 
 _SPACE = re.compile(r"\s+")
+# Inline markup: the quote comes from the rendered page, the line from the file.
+_INLINE = re.compile(r"[`*_~]")
 QUOTE_PREFIX = 24
 RESOLVED_MARK = " · resolved"
 
@@ -69,11 +71,16 @@ def _place(
 
 
 def _line_index(quote: str, lines: list[str]) -> int | None:
-    """The line holding the start of the quote, ignoring markdown syntax."""
-    needle = _SPACE.sub(" ", quote).strip()[:QUOTE_PREFIX]
+    """The line holding the start of the quote, ignoring markdown syntax.
+
+    A quote arrives from rendered text, so it has no markup in it while the
+    source line may carry plenty — `**Go:** a sentence` must still match the
+    quote `Go: a sentence`.
+    """
+    needle = _INLINE.sub("", _SPACE.sub(" ", quote)).strip()[:QUOTE_PREFIX]
     if not needle:
         return None
     for index, line in enumerate(lines):
-        if needle in _SPACE.sub(" ", line):
+        if needle in _INLINE.sub("", _SPACE.sub(" ", line)):
             return index
     return None

@@ -145,15 +145,22 @@ class Store:
         return annotation
 
     def set_ink(self, name: str, block: str, quote: str, strokes: list[dict]) -> dict:
-        """Replace the ink drawn on one block, creating its ink note on the first stroke."""
+        """Replace the ink drawn on one block; erasing the last stroke removes the note."""
         self.read(name)
         annotations = self.annotations(name)
-        for annotation in annotations:
-            if annotation.get("kind") == INK_KIND and annotation.get("block") == block:
-                annotation["strokes"] = strokes
-                self._write_annotations(name, annotations)
-                return annotation
-        annotation = {
+        existing = next(
+            (
+                annotation
+                for annotation in annotations
+                if annotation.get("kind") == INK_KIND and annotation.get("block") == block
+            ),
+            None,
+        )
+        if existing is not None:
+            return self._rewrite_ink(name, annotations, existing, strokes)
+        if not strokes:
+            return {}
+        created = {
             "id": _next_id(annotations),
             "kind": INK_KIND,
             "block": block,
@@ -166,8 +173,19 @@ class Store:
             "created": _now(),
             "resolved": False,
         }
-        self._write_annotations(name, [*annotations, annotation])
-        return annotation
+        self._write_annotations(name, [*annotations, created])
+        return created
+
+    def _rewrite_ink(
+        self, name: str, annotations: list[dict], existing: dict, strokes: list[dict]
+    ) -> dict:
+        if strokes:
+            existing["strokes"] = strokes
+            self._write_annotations(name, annotations)
+            return existing
+        remaining = [item for item in annotations if item["id"] != existing["id"]]
+        self._write_annotations(name, remaining)
+        return {"id": existing["id"], "removed": True}
 
     def set_resolved(self, name: str, annotation_id: str, resolved: bool) -> dict:
         annotations = self.annotations(name)

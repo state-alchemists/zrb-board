@@ -1,7 +1,15 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { project, toAbsolute, toNormalized, toPath } from '../src/board/static/coords.js';
+import {
+  distanceToPolyline,
+  distanceToSegment,
+  nearestStrokeIndex,
+  project,
+  toAbsolute,
+  toNormalized,
+  toPath,
+} from '../src/board/static/coords.js';
 
 const BLOCK = { left: 100, top: 200, width: 400, height: 50 };
 const OVERLAY = { left: 80, top: 60, width: 440, height: 900 };
@@ -53,4 +61,37 @@ test('a stroke may run outside its block and still project', () => {
   const outside = toNormalized({ x: 40, y: 190 }, BLOCK);
   assert.ok(outside.x < 0);
   assert.deepEqual(toAbsolute(outside, BLOCK), { x: 40, y: 190 });
+});
+
+test('a point beside a segment is measured at right angles', () => {
+  assert.equal(distanceToSegment({ x: 5, y: 3 }, { x: 0, y: 0 }, { x: 10, y: 0 }), 3);
+});
+
+test('a point past the end of a segment is measured to that end', () => {
+  assert.equal(distanceToSegment({ x: 14, y: 3 }, { x: 0, y: 0 }, { x: 10, y: 0 }), 5);
+});
+
+test('a one-point stroke still has a distance', () => {
+  assert.equal(distanceToPolyline({ x: 0, y: 4 }, [{ x: 0, y: 0 }]), 4);
+});
+
+test('a click ten pixels off a stroke still finds it', () => {
+  const strokes = [{ points: [{ x: 0, y: 0 }, { x: 1, y: 0 }] }];
+  const point = { x: BLOCK.left + BLOCK.width / 2, y: BLOCK.top + 8 };
+  assert.equal(nearestStrokeIndex(point, strokes, BLOCK, 10), 0);
+});
+
+test('a click far from every stroke finds nothing', () => {
+  const strokes = [{ points: [{ x: 0, y: 0 }, { x: 1, y: 0 }] }];
+  const point = { x: BLOCK.left, y: BLOCK.top + 200 };
+  assert.equal(nearestStrokeIndex(point, strokes, BLOCK, 10), -1);
+});
+
+test('the nearer of two strokes is the one erased', () => {
+  const strokes = [
+    { points: [{ x: 0, y: 0 }, { x: 1, y: 0 }] },
+    { points: [{ x: 0, y: 0.8 }, { x: 1, y: 0.8 }] },
+  ];
+  const point = { x: BLOCK.left + 200, y: BLOCK.top + 41 };
+  assert.equal(nearestStrokeIndex(point, strokes, BLOCK, 10), 1);
 });
