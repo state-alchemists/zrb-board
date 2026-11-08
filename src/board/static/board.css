@@ -115,6 +115,41 @@ button:hover {
   overflow: visible;
 }
 
+#tools {
+  display: none;
+  gap: 0.4rem;
+  align-items: center;
+  padding: 0.5rem 1.5rem;
+  border-bottom: 1px solid #e4e0d8;
+  background: #f6f2ea;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: 0.8rem;
+  position: sticky;
+  top: 2.9rem;
+  z-index: 19;
+  flex-wrap: wrap;
+}
+
+#tools.visible {
+  display: flex;
+}
+
+#tools button {
+  padding: 0.25rem 0.6rem;
+  font-size: 0.8rem;
+}
+
+#tools button.active {
+  background: #14161a;
+  border-color: #14161a;
+  color: #fbfaf7;
+}
+
+#tools .hint {
+  color: #a2988a;
+  margin-left: 0.4rem;
+}
+
 body.drawing #article {
   user-select: none;
   cursor: crosshair;

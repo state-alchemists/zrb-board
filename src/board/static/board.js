@@ -1,12 +1,30 @@
-import { nearestStrokeIndex, toNormalized, toPath } from './coords.js';
+import { nearestStrokeIndex, project, toNormalized, toPath } from './coords.js';
 
 const POLL_MS = 2000;
 const INK_COLOUR = '#c0392b';
 const INK_WIDTH = 2;
 const ERASE_TOLERANCE = 10;
 const QUOTE_LENGTH = 80;
+const OWNER = 'go'; // the browser is always Go's hand
+const SAME_POINT = 1e-4;
+const TEXT_RATIO = 0.45;
+const TEXT_MIN = 12;
+const TEXT_MAX = 40;
+const SVG = 'http://www.w3.org/2000/svg';
+const TOOLS = ['pen', 'line', 'arrow', 'rect', 'ellipse', 'text', 'erase'];
 
-const state = { name: null, rev: null, doc: null, editing: false, drawing: false, erasing: false };
+const state = {
+  name: null,
+  rev: null,
+  doc: null,
+  editing: false,
+  drawing: false,
+  tool: 'pen',
+  compose: null,
+};
+
+let draft = null;
+let preview = null;
 
 function ink() {
   return document.querySelector('#ink');
@@ -37,6 +55,10 @@ function showBanner(message) {
   banner.classList.add('visible');
 }
 
+function hideBanner() {
+  document.querySelector('#banner').classList.remove('visible');
+}
+
 /* --- reading ------------------------------------------------------------ */
 
 async function load() {
@@ -56,7 +78,7 @@ async function renderDoc(doc) {
   if (state.editing) document.querySelector('#editor').value = doc.markdown;
 }
 
-/* A ```mermaid fence is drawn in place, offline: the bundle is vendored. A
+/* A mermaid fence is drawn in place, offline: the bundle is vendored. A
    diagram that fails to parse stays a code block with its error on hover,
    because a silent blank is worse than the source. */
 async function renderDiagrams() {
@@ -117,13 +139,17 @@ function buildCard(annotation) {
   if (annotation.kind === 'ink') {
     const summary = document.createElement('div');
     summary.className = 'note';
-    summary.textContent = `✎ ${annotation.strokes.length} stroke(s) here`;
+    summary.textContent = `✎ ${annotation.strokes.length} mark(s) here`;
     card.appendChild(summary);
-    const remove = document.createElement('button');
-    remove.type = 'button';
-    remove.textContent = 'erase';
-    remove.addEventListener('click', () => saveInk(annotation.resolved_block, []));
-    card.appendChild(remove);
+    if (annotation.author === OWNER) {
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.textContent = 'erase';
+      remove.addEventListener('click', () =>
+        saveInk(annotation.resolved_block, [], annotation.author),
+      );
+      card.appendChild(remove);
+    }
     return card;
   }
 
@@ -172,32 +198,90 @@ function renderInk(annotations) {
     const block = document.querySelector(`[data-block="${annotation.resolved_block}"]`);
     if (!block) continue;
     const blockRect = block.getBoundingClientRect();
-    annotation.strokes.forEach((stroke, index) => {
-      overlay.appendChild(
-        strokePath(stroke, blockRect, overlayRect, {
-          annotation: annotation.id,
-          block: annotation.resolved_block,
-          index,
-        }),
-      );
-    });
+    for (const shape of annotation.strokes) {
+      overlay.appendChild(shapeElement(shape, blockRect, overlayRect));
+    }
   }
 }
 
-function strokePath(stroke, blockRect, overlayRect, dataset) {
-  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-  path.setAttribute('d', toPath(stroke.points || [], blockRect, overlayRect));
-  path.setAttribute('fill', 'none');
-  path.setAttribute('stroke', stroke.color || INK_COLOUR);
-  path.setAttribute('stroke-width', String(stroke.width || INK_WIDTH));
-  path.setAttribute('stroke-linecap', 'round');
-  path.setAttribute('stroke-linejoin', 'round');
-  if (dataset) {
-    path.dataset.annotation = dataset.annotation;
-    path.dataset.block = dataset.block;
-    path.dataset.index = String(dataset.index);
+function shapeElement(shape, blockRect, overlayRect) {
+  const tool = shape.tool || 'pen';
+  const colour = shape.color || INK_COLOUR;
+  const group = document.createElementNS(SVG, 'g');
+  group.setAttribute('stroke', colour);
+  group.setAttribute('stroke-width', String(shape.width || INK_WIDTH));
+  group.setAttribute('fill', 'none');
+  group.setAttribute('stroke-linecap', 'round');
+  group.setAttribute('stroke-linejoin', 'round');
+
+  if (tool === 'pen') {
+    const path = document.createElementNS(SVG, 'path');
+    path.setAttribute('d', toPath(shape.points || [], blockRect, overlayRect));
+    group.appendChild(path);
+    return group;
   }
-  return path;
+  if (tool === 'line' || tool === 'arrow') {
+    const from = project(shape.from, blockRect, overlayRect);
+    const to = project(shape.to, blockRect, overlayRect);
+    group.appendChild(lineElement(from, to));
+    if (tool === 'arrow') group.appendChild(arrowHead(from, to));
+    return group;
+  }
+  if (tool === 'rect') {
+    const from = project(shape.from, blockRect, overlayRect);
+    const to = project(shape.to, blockRect, overlayRect);
+    const box = document.createElementNS(SVG, 'rect');
+    box.setAttribute('x', String(Math.min(from.x, to.x)));
+    box.setAttribute('y', String(Math.min(from.y, to.y)));
+    box.setAttribute('width', String(Math.abs(to.x - from.x)));
+    box.setAttribute('height', String(Math.abs(to.y - from.y)));
+    box.setAttribute('rx', '4');
+    group.appendChild(box);
+    return group;
+  }
+  if (tool === 'ellipse') {
+    const from = project(shape.from, blockRect, overlayRect);
+    const to = project(shape.to, blockRect, overlayRect);
+    const circle = document.createElementNS(SVG, 'ellipse');
+    circle.setAttribute('cx', String((from.x + to.x) / 2));
+    circle.setAttribute('cy', String((from.y + to.y) / 2));
+    circle.setAttribute('rx', String(Math.abs(to.x - from.x) / 2));
+    circle.setAttribute('ry', String(Math.abs(to.y - from.y) / 2));
+    group.appendChild(circle);
+    return group;
+  }
+  const at = project(shape.at || { x: 0, y: 0 }, blockRect, overlayRect);
+  const words = document.createElementNS(SVG, 'text');
+  const size = Math.max(TEXT_MIN, Math.min(TEXT_MAX, TEXT_RATIO * blockRect.height));
+  words.setAttribute('x', String(at.x));
+  words.setAttribute('y', String(at.y));
+  words.setAttribute('font-size', String(size));
+  words.setAttribute('font-family', 'ui-sans-serif, system-ui, sans-serif');
+  words.setAttribute('fill', colour);
+  words.setAttribute('stroke', 'none');
+  words.textContent = shape.text || '';
+  group.appendChild(words);
+  return group;
+}
+
+function lineElement(from, to) {
+  const line = document.createElementNS(SVG, 'line');
+  line.setAttribute('x1', String(from.x));
+  line.setAttribute('y1', String(from.y));
+  line.setAttribute('x2', String(to.x));
+  line.setAttribute('y2', String(to.y));
+  return line;
+}
+
+function arrowHead(from, to) {
+  const angle = Math.atan2(to.y - from.y, to.x - from.x);
+  const length = Math.hypot(to.x - from.x, to.y - from.y);
+  const size = Math.min(16, length * 0.3);
+  const barb = (offset) =>
+    `${to.x - size * Math.cos(angle + offset)},${to.y - size * Math.sin(angle + offset)}`;
+  const head = document.createElementNS(SVG, 'polyline');
+  head.setAttribute('points', `${barb(-0.45)} ${to.x},${to.y} ${barb(0.45)}`);
+  return head;
 }
 
 function blockUnder(clientX, clientY) {
@@ -208,64 +292,102 @@ function blockUnder(clientX, clientY) {
   return element ? element.closest('[data-block]') : null;
 }
 
-function inkNoteFor(blockId) {
+function ownInkFor(blockId) {
   return (state.doc.annotations || []).find(
-    (annotation) => annotation.kind === 'ink' && annotation.resolved_block === blockId,
+    (annotation) =>
+      annotation.kind === 'ink' &&
+      annotation.author === OWNER &&
+      annotation.resolved_block === blockId,
   );
 }
 
-async function saveInk(blockId, strokes) {
+async function saveInk(blockId, strokes, author = OWNER) {
   const block = (state.doc.blocks || []).find((item) => item.id === blockId);
   const quote = (block ? block.text : '').slice(0, QUOTE_LENGTH);
   await request(`/api/docs/${state.name}/ink/${blockId}`, {
     method: 'PUT',
-    body: JSON.stringify({ quote, strokes, author: 'go' }),
+    body: JSON.stringify({ quote, strokes, author }),
   });
   await load();
 }
 
-let draft = null;
+/* --- drawing ------------------------------------------------------------ */
 
-function beginStroke(event) {
-  if (!state.drawing || state.erasing) return;
+function draftShape() {
+  if (draft.tool === 'pen') {
+    return { tool: 'pen', points: draft.points, color: INK_COLOUR, width: INK_WIDTH };
+  }
+  return { tool: draft.tool, from: draft.from, to: draft.to, color: INK_COLOUR, width: INK_WIDTH };
+}
+
+function previewMark() {
+  if (preview) preview.remove();
+  preview = shapeElement(draftShape(), draft.rect, ink().getBoundingClientRect());
+  ink().appendChild(preview);
+}
+
+function beginMark(event) {
+  if (!state.drawing) return;
+  if (state.tool === 'erase') {
+    eraseAt(event);
+    return;
+  }
   const block = blockUnder(event.clientX, event.clientY);
   if (!block) return;
+  const rect = block.getBoundingClientRect();
+  const point = toNormalized({ x: event.clientX, y: event.clientY }, rect);
+  if (state.tool === 'text') {
+    openTextCompose(block.dataset.block, point, event);
+    return;
+  }
   ink().setPointerCapture(event.pointerId);
-  draft = { blockId: block.dataset.block, rect: block.getBoundingClientRect(), points: [], path: null };
-  draft.path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-  draft.path.setAttribute('fill', 'none');
-  draft.path.setAttribute('stroke', INK_COLOUR);
-  draft.path.setAttribute('stroke-width', String(INK_WIDTH));
-  draft.path.setAttribute('stroke-linecap', 'round');
-  ink().appendChild(draft.path);
-  extendStroke(event);
+  draft = {
+    tool: state.tool,
+    blockId: block.dataset.block,
+    rect,
+    points: [point],
+    from: point,
+    to: point,
+  };
+  previewMark();
 }
 
-function extendStroke(event) {
+function extendMark(event) {
   if (!draft) return;
-  const overlayRect = ink().getBoundingClientRect();
-  draft.points.push(toNormalized({ x: event.clientX, y: event.clientY }, draft.rect));
-  draft.path.setAttribute('d', toPath(draft.points, draft.rect, overlayRect));
+  const point = toNormalized({ x: event.clientX, y: event.clientY }, draft.rect);
+  if (draft.tool === 'pen') draft.points.push(point);
+  else draft.to = point;
+  previewMark();
 }
 
-async function endStroke() {
+async function endMark() {
   if (!draft) return;
-  const { blockId, points } = draft;
+  const { blockId, tool } = draft;
+  const shape = draftShape();
+  const empty =
+    tool === 'pen'
+      ? shape.points.length < 2
+      : Math.abs(shape.to.x - shape.from.x) < SAME_POINT &&
+        Math.abs(shape.to.y - shape.from.y) < SAME_POINT;
   draft = null;
-  if (points.length < 2) {
+  if (preview) {
+    preview.remove();
+    preview = null;
+  }
+  if (empty) {
     await load();
     return;
   }
-  const existing = inkNoteFor(blockId);
-  const strokes = existing ? [...existing.strokes, { points, color: INK_COLOUR, width: INK_WIDTH }] : [{ points, color: INK_COLOUR, width: INK_WIDTH }];
-  await saveInk(blockId, strokes);
+  const existing = ownInkFor(blockId);
+  await saveInk(blockId, existing ? [...existing.strokes, shape] : [shape]);
 }
 
 async function eraseAt(event) {
-  if (!state.drawing || !state.erasing) return;
+  if (!state.doc) return;
   const point = { x: event.clientX, y: event.clientY };
   for (const annotation of state.doc.annotations) {
     if (annotation.kind !== 'ink' || annotation.orphaned) continue;
+    if (annotation.author !== OWNER) continue;
     const block = document.querySelector(`[data-block="${annotation.resolved_block}"]`);
     if (!block) continue;
     const rect = block.getBoundingClientRect();
@@ -277,20 +399,24 @@ async function eraseAt(event) {
   }
 }
 
-function setDrawing(drawing) {
-  state.drawing = drawing;
-  if (!drawing) state.erasing = false;
-  document.body.classList.toggle('drawing', state.drawing);
-  document.body.classList.toggle('erasing', state.erasing);
-  document.querySelector('#draw').textContent = state.drawing ? 'stop drawing' : 'draw';
-  document.querySelector('#erase').textContent = state.erasing ? 'erase: on' : 'erase';
+function setTool(tool) {
+  state.tool = tool;
+  for (const button of document.querySelectorAll('#tools button')) {
+    button.classList.toggle('active', button.dataset.tool === tool);
+  }
   ink().style.pointerEvents = state.drawing ? 'auto' : 'none';
 }
 
-function setErasing(erasing) {
-  state.erasing = erasing;
-  document.body.classList.toggle('erasing', erasing);
-  document.querySelector('#erase').textContent = erasing ? 'erase: on' : 'erase';
+function setDrawing(drawing) {
+  state.drawing = drawing;
+  document.body.classList.toggle('drawing', drawing);
+  document.querySelector('#draw').textContent = drawing ? 'stop ink' : 'ink';
+  document.querySelector('#tools').classList.toggle('visible', drawing);
+  setTool(state.tool);
+  if (!drawing) {
+    ink().style.pointerEvents = 'none';
+    hideCompose();
+  }
 }
 
 /* --- writing ------------------------------------------------------------ */
@@ -316,12 +442,36 @@ async function save() {
     );
     return;
   }
+  hideBanner();
   setEditing(false);
   await load();
   toast('saved');
 }
 
-/* --- annotating --------------------------------------------------------- */
+/* --- composing ---------------------------------------------------------- */
+
+function showCompose(clientX, clientY, placeholder) {
+  const compose = document.querySelector('#compose');
+  compose.classList.add('visible');
+  const frame = compose.getBoundingClientRect();
+  const left = Math.min(clientX, window.innerWidth - frame.width - 24);
+  compose.style.left = `${Math.max(24, left)}px`;
+  compose.style.top = `${clientY + window.scrollY + 8}px`;
+  const area = compose.querySelector('textarea');
+  area.placeholder = placeholder;
+  area.value = '';
+  area.focus();
+}
+
+function hideCompose() {
+  document.querySelector('#compose').classList.remove('visible');
+  state.compose = null;
+}
+
+function openTextCompose(blockId, at, event) {
+  state.compose = { mode: 'text', blockId, at };
+  showCompose(event.clientX, event.clientY, 'words to put on the page');
+}
 
 function selectionBlock(range) {
   const node = range.startContainer;
@@ -346,35 +496,35 @@ function onSelection() {
   const block = selectionBlock(range);
   if (!block) return hideCompose();
   const { start, end } = offsetsWithin(block, range);
-  openCompose({ block: block.dataset.block, quote, start, end, rect: range.getBoundingClientRect() });
-}
-
-function openCompose(selection) {
-  state.selection = selection;
-  const compose = document.querySelector('#compose');
-  compose.classList.add('visible');
-  const frame = compose.getBoundingClientRect();
-  const left = Math.min(selection.rect.left, window.innerWidth - frame.width - 24);
-  compose.style.left = `${Math.max(24, left)}px`;
-  compose.style.top = `${selection.rect.bottom + window.scrollY + 8}px`;
-  compose.querySelector('textarea').value = '';
-  compose.querySelector('textarea').focus();
-}
-
-function hideCompose() {
-  document.querySelector('#compose').classList.remove('visible');
-  state.selection = null;
+  const rect = range.getBoundingClientRect();
+  state.compose = { mode: 'note', block: block.dataset.block, quote, start, end };
+  showCompose(rect.left, rect.bottom, 'what do you want to say about this?');
 }
 
 async function submitCompose() {
-  if (!state.selection) return;
-  const note = document.querySelector('#compose textarea').value.trim();
-  if (!note) return hideCompose();
-  const { block, quote, start, end } = state.selection;
+  const compose = state.compose;
+  const area = document.querySelector('#compose textarea');
+  const text = area.value.trim();
+  if (!compose || !text) return hideCompose();
   hideCompose();
+
+  if (compose.mode === 'text') {
+    const shape = { tool: 'text', at: compose.at, text, color: INK_COLOUR, width: INK_WIDTH };
+    const existing = ownInkFor(compose.blockId);
+    await saveInk(compose.blockId, existing ? [...existing.strokes, shape] : [shape]);
+    return;
+  }
+
   await request(`/api/docs/${state.name}/annotations`, {
     method: 'POST',
-    body: JSON.stringify({ block, quote, start, end, note, author: 'go' }),
+    body: JSON.stringify({
+      block: compose.block,
+      quote: compose.quote,
+      start: compose.start,
+      end: compose.end,
+      note: text,
+      author: OWNER,
+    }),
   });
   await load();
   toast('noted');
@@ -393,21 +543,21 @@ async function notify() {
 function wire() {
   const overlay = ink();
   document.addEventListener('mouseup', onSelection);
-  overlay.addEventListener('pointerdown', (event) => {
-    eraseAt(event);
-    beginStroke(event);
-  });
-  overlay.addEventListener('pointermove', extendStroke);
-  overlay.addEventListener('pointerup', endStroke);
-  overlay.addEventListener('pointercancel', endStroke);
+  overlay.addEventListener('pointerdown', beginMark);
+  overlay.addEventListener('pointermove', extendMark);
+  overlay.addEventListener('pointerup', endMark);
+  overlay.addEventListener('pointercancel', endMark);
+  for (const button of document.querySelectorAll('#tools button')) {
+    button.addEventListener('click', () => setTool(button.dataset.tool));
+  }
+  document.querySelector('#draw').addEventListener('click', () => setDrawing(!state.drawing));
   document.querySelector('#edit').addEventListener('click', () => setEditing(!state.editing));
   document.querySelector('#save').addEventListener('click', save);
-  document.querySelector('#draw').addEventListener('click', () => setDrawing(!state.drawing));
-  document.querySelector('#erase').addEventListener('click', () => setErasing(!state.erasing));
   document.querySelector('#notify').addEventListener('click', notify);
   document.querySelector('#compose-save').addEventListener('click', submitCompose);
   document.querySelector('#compose-cancel').addEventListener('click', hideCompose);
   document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') hideCompose();
     if ((event.metaKey || event.ctrlKey) && event.key === 's' && state.editing) {
       event.preventDefault();
       save();
@@ -415,6 +565,7 @@ function wire() {
   });
   window.addEventListener('resize', () => renderInk(state.doc ? state.doc.annotations : []));
   window.setInterval(poll, POLL_MS);
+  setTool(TOOLS[0]);
 }
 
 async function poll() {
@@ -424,7 +575,7 @@ async function poll() {
   if (head.rev && head.rev !== state.rev) {
     state.doc = head;
     state.rev = head.rev;
-    renderDoc(head);
+    await renderDoc(head);
   }
 }
 

@@ -11,12 +11,22 @@
       <a href="/">board</a>
       <span class="rev" id="rev"></span>
       <span class="spacer"></span>
-      <button id="draw" type="button">draw</button>
-      <button id="erase" type="button">erase</button>
+      <button id="draw" type="button">ink</button>
       <button id="edit" type="button">edit markdown</button>
       <button id="save" type="button">save</button>
       <button id="notify" type="button">mark for Tara</button>
     </header>
+
+    <div id="tools">
+      <button type="button" data-tool="pen">✎ pen</button>
+      <button type="button" data-tool="line">╲ line</button>
+      <button type="button" data-tool="arrow">↘ arrow</button>
+      <button type="button" data-tool="rect">▭ box</button>
+      <button type="button" data-tool="ellipse">◯ circle</button>
+      <button type="button" data-tool="text">T words</button>
+      <button type="button" data-tool="erase">⌫ erase</button>
+      <span class="hint">drag to draw · Esc closes the box</span>
+    </div>
 
     <div id="banner"></div>
 
@@ -37,7 +47,7 @@
       <textarea placeholder="what do you want to say about this?"></textarea>
       <div class="row">
         <button id="compose-cancel" type="button">cancel</button>
-        <button id="compose-save" type="button">note it</button>
+        <button id="compose-save" type="button">put it down</button>
       </div>
     </div>
 

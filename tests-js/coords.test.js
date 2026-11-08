@@ -4,8 +4,11 @@ import test from 'node:test';
 import {
   distanceToPolyline,
   distanceToSegment,
+  ellipseOutline,
   nearestStrokeIndex,
+  outlinePoints,
   project,
+  rectOutline,
   toAbsolute,
   toNormalized,
   toPath,
@@ -94,4 +97,42 @@ test('the nearer of two strokes is the one erased', () => {
   ];
   const point = { x: BLOCK.left + 200, y: BLOCK.top + 41 };
   assert.equal(nearestStrokeIndex(point, strokes, BLOCK, 10), 1);
+});
+
+test('a box is hit on its edge, not through its middle', () => {
+  const box = { tool: 'rect', from: { x: 0, y: 0 }, to: { x: 1, y: 1 } };
+  const onEdge = { x: BLOCK.left + 3, y: BLOCK.top + 25 };
+  const inMiddle = { x: BLOCK.left + 200, y: BLOCK.top + 25 };
+  assert.equal(nearestStrokeIndex(onEdge, [box], BLOCK, 10), 0);
+  assert.equal(nearestStrokeIndex(inMiddle, [box], BLOCK, 10), -1);
+});
+
+test('a circle is hit on its rim', () => {
+  const circle = { tool: 'ellipse', from: { x: 0, y: 0 }, to: { x: 1, y: 1 } };
+  const onRim = { x: BLOCK.left + 400, y: BLOCK.top + 25 };
+  const inMiddle = { x: BLOCK.left + 200, y: BLOCK.top + 25 };
+  assert.equal(nearestStrokeIndex(onRim, [circle], BLOCK, 10), 0);
+  assert.equal(nearestStrokeIndex(inMiddle, [circle], BLOCK, 10), -1);
+});
+
+test('a line is hit anywhere between its ends', () => {
+  const line = { tool: 'line', from: { x: 0.1, y: 0.5 }, to: { x: 0.9, y: 0.5 } };
+  assert.equal(nearestStrokeIndex({ x: BLOCK.left + 300, y: BLOCK.top + 28 }, [line], BLOCK, 10), 0);
+});
+
+test('a word is hit near where it was written', () => {
+  const word = { tool: 'text', at: { x: 0.5, y: 0.5 }, text: 'hello' };
+  assert.equal(nearestStrokeIndex({ x: BLOCK.left + 210, y: BLOCK.top + 26 }, [word], BLOCK, 10), 0);
+  assert.equal(nearestStrokeIndex({ x: BLOCK.left + 20, y: BLOCK.top + 45 }, [word], BLOCK, 10), -1);
+});
+
+test('a box and a circle report their outlines in normalised coordinates', () => {
+  assert.deepEqual(rectOutline({ x: 0.2, y: 0.4 }, { x: 0.6, y: 0.8 })[1], { x: 0.6, y: 0.4 });
+  const circle = ellipseOutline({ x: 0, y: 0 }, { x: 1, y: 1 }, 4);
+  assert.equal(circle.length, 5);
+  assert.ok(Math.abs(circle[0].x - 0) < 1e-9 || Math.abs(circle[0].x - 1) < 1e-9);
+});
+
+test('an old pen stroke with no tool is still treated as a pen stroke', () => {
+  assert.deepEqual(outlinePoints({ points: [{ x: 0, y: 0 }] }), [{ x: 0, y: 0 }]);
 });

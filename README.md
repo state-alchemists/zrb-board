@@ -3,6 +3,10 @@
 A turn-based board for a human and a coding agent: markdown files that render
 in a browser, with notes pinned to the paragraph they disagree with.
 
+The design — why markdown is the truth, what a block is, why ink is normalised
+to its block and why the nudge is a trigger — is in
+[`docs/architecture.md`](docs/architecture.md).
+
 The agent does not watch the page. It reads `/api/docs/<name>/state.md`, a
 plain-text view of the document with every note placed inline, and writes back
 with a revision-checked `PUT`. Turns are the clock; the browser is a window.
