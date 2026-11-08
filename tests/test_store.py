@@ -60,6 +60,32 @@ def test_should_leave_the_title_as_the_name_when_there_is_no_heading(store):
     assert doc.title == "0001-question"
 
 
+def test_should_keep_one_ink_annotation_per_block(store):
+    store.create("0001-question", "# Q\n\ntext\n")
+    first = store.set_ink("0001-question", "b_1", "text", [_stroke(0.0)])
+    second = store.set_ink("0001-question", "b_1", "text", [_stroke(0.0), _stroke(0.5)])
+    assert first["id"] == second["id"]
+    assert len(store.annotations("0001-question")) == 1
+    assert len(second["strokes"]) == 2
+
+
+def test_should_keep_ink_apart_from_a_written_note(store):
+    store.create("0001-question", "# Q\n\ntext\n")
+    store.add_annotation("0001-question", _note("text"))
+    store.set_ink("0001-question", "b_1", "text", [_stroke(0.0)])
+    kinds = [annotation["kind"] for annotation in store.annotations("0001-question")]
+    assert kinds == ["note", "ink"]
+
+
+def test_should_refuse_ink_on_a_document_that_is_not_there(store):
+    with pytest.raises(DocNotFound):
+        store.set_ink("missing", "b_1", "text", [_stroke(0.0)])
+
+
+def _stroke(offset: float) -> dict:
+    return {"points": [{"x": offset, "y": 0.0}, {"x": offset + 0.1, "y": 0.2}], "color": "#c0392b"}
+
+
 def _note(quote: str) -> dict:
     return {
         "block": "b_1",

@@ -67,3 +67,29 @@ def test_should_answer_404_for_a_document_that_is_not_there(client):
 def test_should_record_a_marker_in_the_inbox(client):
     client.post("/api/inbox", json={"text": "board: 0001-question"})
     assert "board: 0001-question" in client.get("/api/inbox").text
+
+
+def test_should_store_ink_against_the_block_it_was_drawn_on(client, store):
+    store.create("0001-question", "# Q\n\ntext\n")
+    block = client.get("/api/docs/0001-question").json()["blocks"][1]["id"]
+    stroke = {"points": [{"x": 0, "y": 0}, {"x": 0.5, "y": 0.5}], "color": "#c0392b"}
+    response = client.put(
+        f"/api/docs/0001-question/ink/{block}", json={"quote": "text", "strokes": [stroke]}
+    )
+    assert response.status_code == 200
+    annotation = client.get("/api/docs/0001-question").json()["annotations"][0]
+    assert annotation["kind"] == "ink"
+    assert annotation["orphaned"] is False
+    assert annotation["strokes"][0]["points"][1] == {"x": 0.5, "y": 0.5}
+
+
+def test_should_orphan_ink_when_its_block_is_rewritten_away(client, store):
+    doc = store.create("0001-question", "# Q\n\ntext\n")
+    block = client.get("/api/docs/0001-question").json()["blocks"][1]["id"]
+    client.put(f"/api/docs/0001-question/ink/{block}", json={"quote": "text", "strokes": []})
+    client.put(
+        "/api/docs/0001-question",
+        json={"markdown": "# Q\n\nrewritten\n", "rev": doc.rev},
+    )
+    annotation = client.get("/api/docs/0001-question").json()["annotations"][0]
+    assert annotation["orphaned"] is True

@@ -34,6 +34,11 @@ def build_digest(doc: Doc, annotations: list[dict]) -> str:
 def format_note(annotation: dict) -> str:
     mark = RESOLVED_MARK if annotation.get("resolved") else ""
     note = " ".join(annotation.get("note", "").split())
+    strokes = len(annotation.get("strokes") or [])
+    if strokes and not note:
+        note = f"✎ {strokes} stroke(s), no note"
+    elif strokes:
+        note = f"✎ {strokes} · {note}"
     return (
         f"⟦{annotation['id']} · {annotation['author']}{mark}"
         f" · block {annotation['block']} — {note}⟧"

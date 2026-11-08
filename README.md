@@ -42,9 +42,23 @@ note appears under "the text moved — these lost their anchor". It is never
 placed somewhere that merely looks close.
 
 The block id is a hash of the block's visible text, so editing a paragraph
-changes its id; that is what the quote fallback is for. Strokes, when the pen
-layer arrives, will be stored block-local and normalised, so they follow their
-paragraph through a reflow.
+changes its id; that is what the quote fallback is for.
+
+Strokes are stored the same way: normalised coordinates inside their block
+(`0.0`–`1.0`, `x` and `y`), never page pixels. A circle drawn around a sentence
+follows that sentence through an edit above it, a resize, or a font change.
+The stored form is ours; Excalidraw's scene format is absolute-coordinate, so
+an `.excalidraw` export is a projection made at export time, not the truth.
+
+## Drawing and editing
+
+`draw` turns the page into a surface: drag to ink, `erase` removes one stroke
+at a time. Both are saved against the block you started the stroke on, and the
+text digest reports them as `✎ 3 strokes, no note` so the agent knows a drawing
+exists without seeing pixels.
+
+`edit markdown` puts the raw file in a textarea; `save` (or Cmd/Ctrl-S) writes
+it back with the revision you read.
 
 ## API
 
@@ -56,6 +70,7 @@ paragraph through a reflow.
 | `PUT /api/docs/{name}` | `{markdown, rev}` — 409 with the current text on a stale rev |
 | `POST /api/docs/{name}/annotations` | `{block, quote, note, author, start, end}` |
 | `POST /api/docs/{name}/annotations/{id}/resolve` | close a note |
+| `PUT /api/docs/{name}/ink/{block}` | `{quote, strokes}` — replace the strokes drawn on one block |
 | `GET`/`POST /api/inbox` | the "mark for Tara" marker |
 
 ## The button is a note, not a bell
@@ -71,5 +86,6 @@ line carrying the unread count — and is deliberately not built here yet.
 ## Tests
 
 ```bash
-.venv/bin/python -m pytest -q
+.venv/bin/python -m pytest -q      # storage, anchors, digest, routes
+npm test                           # pen coordinate maths (node --test)
 ```

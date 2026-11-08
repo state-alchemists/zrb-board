@@ -103,6 +103,31 @@ button:hover {
   scroll-margin-top: 4rem;
 }
 
+.paper {
+  position: relative;
+}
+
+#ink {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+  overflow: visible;
+}
+
+body.drawing #article {
+  user-select: none;
+  cursor: crosshair;
+}
+
+body.erasing #article {
+  cursor: cell;
+}
+
+body.drawing #article .block.annotated {
+  background: none;
+}
+
 #article .block.annotated {
   background: linear-gradient(transparent 92%, #f6e6b8 92%);
 }

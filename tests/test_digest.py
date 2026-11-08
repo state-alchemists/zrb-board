@@ -38,3 +38,15 @@ def test_should_count_the_annotations_in_the_header(store):
     doc = store.create("0001-question", "# Q\n\nalpha\n")
     text = digest.build_digest(doc, [_note("alpha"), _note("alpha")])
     assert "2 annotation(s)" in text
+
+
+def test_should_say_when_a_note_carries_a_drawing(store):
+    doc = store.create("0001-question", "# Q\n\nalpha\n")
+    drawn = {**_note("alpha"), "strokes": [{"points": []}, {"points": []}]}
+    assert "✎ 2" in digest.build_digest(doc, [drawn])
+
+
+def test_should_describe_a_drawing_that_has_no_note(store):
+    doc = store.create("0001-question", "# Q\n\nalpha\n")
+    drawn = {**_note("alpha"), "note": "", "strokes": [{"points": []}]}
+    assert "no note" in digest.build_digest(doc, [drawn])

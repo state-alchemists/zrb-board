@@ -1,6 +1,16 @@
-const POLL_MS = 2000;
+import { project, toNormalized, toPath } from './coords.js';
 
-const state = { name: null, rev: null, doc: null, editing: false, selection: null };
+const POLL_MS = 2000;
+const INK_COLOUR = '#c0392b';
+const INK_WIDTH = 2;
+const ERASE_WIDTH = 12;
+const QUOTE_LENGTH = 80;
+
+const state = { name: null, rev: null, doc: null, editing: false, drawing: false, erasing: false };
+
+function ink() {
+  return document.querySelector('#ink');
+}
 
 async function request(path, options = {}) {
   const response = await fetch(path, {
@@ -27,10 +37,6 @@ function showBanner(message) {
   banner.classList.add('visible');
 }
 
-function hideBanner() {
-  document.querySelector('#banner').classList.remove('visible');
-}
-
 /* --- reading ------------------------------------------------------------ */
 
 async function load() {
@@ -43,9 +49,10 @@ async function load() {
 function renderDoc(doc) {
   document.title = `${doc.title} · board`;
   document.querySelector('#rev').textContent = `rev ${doc.rev}`;
-  const article = document.querySelector('#article');
-  article.innerHTML = doc.html;
+  document.querySelector('#article').innerHTML = doc.html;
   placeCards(doc.annotations);
+  renderInk(doc.annotations);
+  if (state.editing) document.querySelector('#editor').value = doc.markdown;
 }
 
 function placeCards(annotations) {
@@ -55,7 +62,7 @@ function placeCards(annotations) {
   orphans.innerHTML = '';
   const nextTop = new Map();
 
-  for (const annotation of annotations.filter((item) => !item.orphaned)) {
+  for (const annotation of annotations.filter((item) => !item.orphaned && item.kind !== 'ink')) {
     const block = document.querySelector(`[data-block="${annotation.resolved_block}"]`);
     if (!block) continue;
     block.classList.add('annotated');
@@ -107,13 +114,149 @@ function renderOrphans(container, annotations) {
   }
 }
 
+/* --- ink ---------------------------------------------------------------- */
+
+function sizeInk() {
+  const article = document.querySelector('#article');
+  const overlay = ink();
+  overlay.setAttribute('width', article.offsetWidth);
+  overlay.setAttribute('height', article.offsetHeight);
+  overlay.setAttribute('viewBox', `0 0 ${article.offsetWidth} ${article.offsetHeight}`);
+}
+
+function renderInk(annotations) {
+  const overlay = ink();
+  overlay.innerHTML = '';
+  sizeInk();
+  const overlayRect = overlay.getBoundingClientRect();
+  for (const annotation of annotations) {
+    if (annotation.kind !== 'ink' || annotation.orphaned) continue;
+    const block = document.querySelector(`[data-block="${annotation.resolved_block}"]`);
+    if (!block) continue;
+    const blockRect = block.getBoundingClientRect();
+    annotation.strokes.forEach((stroke, index) => {
+      overlay.appendChild(
+        strokePath(stroke, blockRect, overlayRect, {
+          annotation: annotation.id,
+          block: annotation.resolved_block,
+          index,
+        }),
+      );
+    });
+  }
+}
+
+function strokePath(stroke, blockRect, overlayRect, dataset) {
+  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  path.setAttribute('d', toPath(stroke.points || [], blockRect, overlayRect));
+  path.setAttribute('fill', 'none');
+  path.setAttribute('stroke', stroke.color || INK_COLOUR);
+  path.setAttribute('stroke-width', String(stroke.width || INK_WIDTH));
+  path.setAttribute('stroke-linecap', 'round');
+  path.setAttribute('stroke-linejoin', 'round');
+  if (dataset) {
+    path.dataset.annotation = dataset.annotation;
+    path.dataset.block = dataset.block;
+    path.dataset.index = String(dataset.index);
+  }
+  return path;
+}
+
+function blockUnder(clientX, clientY) {
+  const overlay = ink();
+  overlay.style.pointerEvents = 'none';
+  const element = document.elementFromPoint(clientX, clientY);
+  overlay.style.pointerEvents = 'auto';
+  return element ? element.closest('[data-block]') : null;
+}
+
+function inkNoteFor(blockId) {
+  return (state.doc.annotations || []).find(
+    (annotation) => annotation.kind === 'ink' && annotation.resolved_block === blockId,
+  );
+}
+
+async function saveInk(blockId, strokes) {
+  const block = (state.doc.blocks || []).find((item) => item.id === blockId);
+  const quote = (block ? block.text : '').slice(0, QUOTE_LENGTH);
+  await request(`/api/docs/${state.name}/ink/${blockId}`, {
+    method: 'PUT',
+    body: JSON.stringify({ quote, strokes }),
+  });
+  await load();
+}
+
+let draft = null;
+
+function beginStroke(event) {
+  if (!state.drawing || state.erasing) return;
+  const block = blockUnder(event.clientX, event.clientY);
+  if (!block) return;
+  ink().setPointerCapture(event.pointerId);
+  draft = { blockId: block.dataset.block, rect: block.getBoundingClientRect(), points: [], path: null };
+  draft.path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  draft.path.setAttribute('fill', 'none');
+  draft.path.setAttribute('stroke', INK_COLOUR);
+  draft.path.setAttribute('stroke-width', String(INK_WIDTH));
+  draft.path.setAttribute('stroke-linecap', 'round');
+  ink().appendChild(draft.path);
+  extendStroke(event);
+}
+
+function extendStroke(event) {
+  if (!draft) return;
+  const overlayRect = ink().getBoundingClientRect();
+  draft.points.push(toNormalized({ x: event.clientX, y: event.clientY }, draft.rect));
+  draft.path.setAttribute('d', toPath(draft.points, draft.rect, overlayRect));
+}
+
+async function endStroke() {
+  if (!draft) return;
+  const { blockId, points } = draft;
+  draft = null;
+  if (points.length < 2) {
+    await load();
+    return;
+  }
+  const existing = inkNoteFor(blockId);
+  const strokes = existing ? [...existing.strokes, { points, color: INK_COLOUR, width: INK_WIDTH }] : [{ points, color: INK_COLOUR, width: INK_WIDTH }];
+  await saveInk(blockId, strokes);
+}
+
+async function eraseAt(event) {
+  if (!state.drawing || !state.erasing) return;
+  const path = event.target.closest('path');
+  if (!path || !path.dataset.annotation) return;
+  const annotation = state.doc.annotations.find((item) => item.id === path.dataset.annotation);
+  if (!annotation) return;
+  const strokes = annotation.strokes.filter((_, index) => String(index) !== path.dataset.index);
+  await saveInk(path.dataset.block, strokes);
+}
+
+function setDrawing(drawing) {
+  state.drawing = drawing;
+  if (!drawing) state.erasing = false;
+  document.body.classList.toggle('drawing', state.drawing);
+  document.body.classList.toggle('erasing', state.erasing);
+  document.querySelector('#draw').textContent = state.drawing ? 'stop drawing' : 'draw';
+  document.querySelector('#erase').textContent = state.erasing ? 'erase: on' : 'erase';
+  ink().style.pointerEvents = state.drawing ? 'auto' : 'none';
+}
+
+function setErasing(erasing) {
+  state.erasing = erasing;
+  document.body.classList.toggle('erasing', erasing);
+  document.querySelector('#erase').textContent = erasing ? 'erase: on' : 'erase';
+}
+
 /* --- writing ------------------------------------------------------------ */
 
 function setEditing(editing) {
   state.editing = editing;
   document.body.classList.toggle('editing', editing);
   document.querySelector('#editor').value = editing ? state.doc.markdown : '';
-  document.querySelector('#edit').textContent = editing ? 'cancel' : 'edit';
+  document.querySelector('#edit').textContent = editing ? 'cancel' : 'edit markdown';
+  if (editing) setDrawing(false);
 }
 
 async function save() {
@@ -129,7 +272,6 @@ async function save() {
     );
     return;
   }
-  hideBanner();
   setEditing(false);
   await load();
   toast('saved');
@@ -152,7 +294,7 @@ function offsetsWithin(block, range) {
 }
 
 function onSelection() {
-  if (state.editing) return;
+  if (state.editing || state.drawing) return;
   const selection = window.getSelection();
   const quote = selection ? selection.toString().trim() : '';
   if (!quote) return hideCompose();
@@ -205,12 +347,29 @@ async function notify() {
 /* --- wiring ------------------------------------------------------------- */
 
 function wire() {
+  const overlay = ink();
   document.addEventListener('mouseup', onSelection);
+  overlay.addEventListener('pointerdown', (event) => {
+    eraseAt(event);
+    beginStroke(event);
+  });
+  overlay.addEventListener('pointermove', extendStroke);
+  overlay.addEventListener('pointerup', endStroke);
+  overlay.addEventListener('pointercancel', endStroke);
   document.querySelector('#edit').addEventListener('click', () => setEditing(!state.editing));
   document.querySelector('#save').addEventListener('click', save);
+  document.querySelector('#draw').addEventListener('click', () => setDrawing(!state.drawing));
+  document.querySelector('#erase').addEventListener('click', () => setErasing(!state.erasing));
   document.querySelector('#notify').addEventListener('click', notify);
   document.querySelector('#compose-save').addEventListener('click', submitCompose);
   document.querySelector('#compose-cancel').addEventListener('click', hideCompose);
+  document.addEventListener('keydown', (event) => {
+    if ((event.metaKey || event.ctrlKey) && event.key === 's' && state.editing) {
+      event.preventDefault();
+      save();
+    }
+  });
+  window.addEventListener('resize', () => renderInk(state.doc ? state.doc.annotations : []));
   window.setInterval(poll, POLL_MS);
 }
 

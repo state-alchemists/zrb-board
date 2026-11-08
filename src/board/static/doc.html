@@ -11,16 +11,21 @@
       <a href="/">board</a>
       <span class="rev" id="rev"></span>
       <span class="spacer"></span>
-      <button id="notify" type="button">mark for Tara</button>
-      <button id="edit" type="button">edit</button>
+      <button id="draw" type="button">draw</button>
+      <button id="erase" type="button">erase</button>
+      <button id="edit" type="button">edit markdown</button>
       <button id="save" type="button">save</button>
+      <button id="notify" type="button">mark for Tara</button>
     </header>
 
     <div id="banner"></div>
 
     <div id="layout">
       <div>
-        <article id="article"></article>
+        <div class="paper">
+          <article id="article"></article>
+          <svg id="ink" aria-hidden="true"></svg>
+        </div>
         <textarea id="editor" spellcheck="false"></textarea>
       </div>
       <aside id="rail">
@@ -37,6 +42,6 @@
     </div>
 
     <div id="toast"></div>
-    <script src="/static/board.js"></script>
+    <script type="module" src="/static/board.js"></script>
   </body>
 </html>

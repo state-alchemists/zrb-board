@@ -1,0 +1,1 @@
+- 2026-11-08T08:33:31+07:00 — board: 0001-what-does-the-board-do-that-chat-doesnt

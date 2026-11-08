@@ -9,7 +9,7 @@ import uvicorn
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from board import anchors, digest, render
 from board.render import Block
@@ -36,6 +36,11 @@ class AnnotationBody(BaseModel):
 
 class InboxBody(BaseModel):
     text: str = ""
+
+
+class InkBody(BaseModel):
+    quote: str = ""
+    strokes: list[dict] = Field(default_factory=list)
 
 
 def default_root() -> Path:
@@ -147,6 +152,13 @@ def _register_routes(app: FastAPI, store: Store) -> None:
             return store.set_resolved(name, annotation_id, resolved=True)
         except DocNotFound:
             raise _not_found(annotation_id) from None
+
+    @app.put("/api/docs/{name}/ink/{block}")
+    def draw_on_block(name: str, block: str, body: InkBody) -> dict:
+        try:
+            return store.set_ink(name, block, body.quote, body.strokes)
+        except DocNotFound:
+            raise _not_found(name) from None
 
     @app.get("/api/docs/{name}/state.md", response_class=PlainTextResponse)
     def read_state(name: str) -> str:

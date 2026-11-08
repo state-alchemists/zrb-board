@@ -19,6 +19,9 @@ from pathlib import Path
 NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 REV_LENGTH = 12
 TITLE_PREFIX = "# "
+NOTE_KIND = "note"
+INK_KIND = "ink"
+INK_AUTHOR = "go"
 
 
 class BoardError(Exception):
@@ -63,6 +66,10 @@ class Doc:
 
 def content_rev(markdown: str) -> str:
     return hashlib.sha1(markdown.encode("utf-8")).hexdigest()[:REV_LENGTH]
+
+
+def _now() -> str:
+    return datetime.now().astimezone().isoformat(timespec="seconds")
 
 
 def _next_id(annotations: list[dict]) -> str:
@@ -123,6 +130,7 @@ class Store:
         annotations = self.annotations(name)
         annotation = {
             "id": _next_id(annotations),
+            "kind": NOTE_KIND,
             "block": payload["block"],
             "quote": payload["quote"],
             "start": payload["start"],
@@ -130,7 +138,32 @@ class Store:
             "note": payload["note"],
             "author": payload["author"],
             "strokes": payload.get("strokes", []),
-            "created": datetime.now().astimezone().isoformat(timespec="seconds"),
+            "created": _now(),
+            "resolved": False,
+        }
+        self._write_annotations(name, [*annotations, annotation])
+        return annotation
+
+    def set_ink(self, name: str, block: str, quote: str, strokes: list[dict]) -> dict:
+        """Replace the ink drawn on one block, creating its ink note on the first stroke."""
+        self.read(name)
+        annotations = self.annotations(name)
+        for annotation in annotations:
+            if annotation.get("kind") == INK_KIND and annotation.get("block") == block:
+                annotation["strokes"] = strokes
+                self._write_annotations(name, annotations)
+                return annotation
+        annotation = {
+            "id": _next_id(annotations),
+            "kind": INK_KIND,
+            "block": block,
+            "quote": quote,
+            "start": 0,
+            "end": 0,
+            "note": "",
+            "author": INK_AUTHOR,
+            "strokes": strokes,
+            "created": _now(),
             "resolved": False,
         }
         self._write_annotations(name, [*annotations, annotation])
