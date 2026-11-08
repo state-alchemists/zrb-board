@@ -259,7 +259,8 @@ body.drawing #article .block.annotated {
 }
 
 body.editing #article,
-body.editing #rail {
+body.editing #rail,
+body.editing #ink {
   display: none;
 }
 

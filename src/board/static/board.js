@@ -149,15 +149,17 @@ function buildCard(annotation) {
     summary.className = 'note';
     summary.textContent = `✎ ${annotation.strokes.length} mark(s) here`;
     card.appendChild(summary);
-    if (annotation.author === OWNER) {
-      const remove = document.createElement('button');
-      remove.type = 'button';
-      remove.textContent = 'erase';
-      remove.addEventListener('click', () =>
-        saveInk(annotation.resolved_block, [], annotation.author),
-      );
-      card.appendChild(remove);
-    }
+    /* Anyone's ink, not only your own. The browser is the human's hand, and the
+       person at the desk has to be able to rub out what the agent drew on their
+       document — the per-author rule exists so a writer cannot clobber another
+       writer's strokes, not so a mark becomes permanent. */
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.textContent = 'erase';
+    remove.addEventListener('click', () =>
+      saveInk(annotation.resolved_block, [], annotation.author),
+    );
+    card.appendChild(remove);
     return card;
   }
 
@@ -199,6 +201,7 @@ function renderOrphans(container, annotations) {
 function sizeInk() {
   const article = document.querySelector('#article');
   const overlay = ink();
+  if (!article.offsetWidth) return; // the editor is open and the article is hidden
   overlay.style.left = `${-INK_GUTTER.left}px`;
   overlay.setAttribute('width', article.offsetWidth + INK_GUTTER.left);
   overlay.setAttribute('height', article.offsetHeight + INK_GUTTER.bottom);
@@ -430,14 +433,16 @@ async function eraseAt(event) {
   const point = { x: event.clientX, y: event.clientY };
   for (const annotation of state.doc.annotations) {
     if (annotation.kind !== 'ink' || annotation.orphaned) continue;
-    if (annotation.author !== OWNER) continue;
     const block = document.querySelector(`[data-block="${annotation.resolved_block}"]`);
     if (!block) continue;
     const rect = block.getBoundingClientRect();
     const index = nearestStrokeIndex(point, annotation.strokes, rect, ERASE_TOLERANCE);
     if (index < 0) continue;
+    /* The stroke is dropped from the list of whoever drew it, which is why the
+       author is passed on: a write replaces one author's ink on the block and
+       leaves the other's alone. */
     const strokes = annotation.strokes.filter((_, position) => position !== index);
-    await saveInk(annotation.resolved_block, strokes);
+    await saveInk(annotation.resolved_block, strokes, annotation.author);
     return;
   }
 }

@@ -108,6 +108,13 @@ Ink is stored **per block and per author**. The first version keyed ink by
 block alone, and an agent drawing one arrow erased the human's underline. Two
 authors, two marks.
 
+That rule governs *writing*, not erasing. A write replaces the strokes of the
+author who made them; the eraser reaches anyone's. The browser is the hand at
+the desk, and the person whose document this is has to be able to rub out what
+the agent drew on it — a mark that can only be removed by the hand that made it
+is a mark that never goes away. The first version applied the author rule to
+erasing too, so the agent's own notes became permanent.
+
 A mark may also begin in the white space beside a paragraph, because that is
 where an arrow pointing at it starts. The drawing surface reaches two hundred
 pixels into the left gutter and a hundred and sixty below the last line, and a
