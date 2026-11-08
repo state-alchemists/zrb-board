@@ -43,16 +43,41 @@ async function load() {
   const doc = await request(`/api/docs/${state.name}`);
   state.doc = doc;
   state.rev = doc.rev;
-  renderDoc(doc);
+  await renderDoc(doc);
 }
 
-function renderDoc(doc) {
+async function renderDoc(doc) {
   document.title = `${doc.title} · board`;
   document.querySelector('#rev').textContent = `rev ${doc.rev}`;
   document.querySelector('#article').innerHTML = doc.html;
+  await renderDiagrams();
   placeCards(doc.annotations);
   renderInk(doc.annotations);
   if (state.editing) document.querySelector('#editor').value = doc.markdown;
+}
+
+/* A ```mermaid fence is drawn in place, offline: the bundle is vendored. A
+   diagram that fails to parse stays a code block with its error on hover,
+   because a silent blank is worse than the source. */
+async function renderDiagrams() {
+  const engine = window.mermaid;
+  if (!engine) return;
+  engine.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'strict' });
+  const fences = Array.from(document.querySelectorAll('#article pre > code.language-mermaid'));
+  let index = 0;
+  for (const fence of fences) {
+    const host = fence.closest('pre');
+    try {
+      const { svg } = await engine.render(`board-diagram-${Date.now()}-${index++}`, fence.textContent);
+      const holder = document.createElement('figure');
+      holder.className = 'diagram';
+      holder.innerHTML = svg;
+      host.replaceWith(holder);
+    } catch (error) {
+      host.classList.add('diagram-failed');
+      host.title = String(error);
+    }
+  }
 }
 
 function placeCards(annotations) {
@@ -62,7 +87,7 @@ function placeCards(annotations) {
   orphans.innerHTML = '';
   const nextTop = new Map();
 
-  for (const annotation of annotations.filter((item) => !item.orphaned && item.kind !== 'ink')) {
+  for (const annotation of annotations.filter((item) => !item.orphaned)) {
     const block = document.querySelector(`[data-block="${annotation.resolved_block}"]`);
     if (!block) continue;
     block.classList.add('annotated');
@@ -88,6 +113,19 @@ function buildCard(annotation) {
   meta.className = 'meta';
   meta.textContent = `${annotation.id} · ${annotation.author}`;
   card.appendChild(meta);
+
+  if (annotation.kind === 'ink') {
+    const summary = document.createElement('div');
+    summary.className = 'note';
+    summary.textContent = `✎ ${annotation.strokes.length} stroke(s) here`;
+    card.appendChild(summary);
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.textContent = 'erase';
+    remove.addEventListener('click', () => saveInk(annotation.resolved_block, []));
+    card.appendChild(remove);
+    return card;
+  }
 
   if (annotation.quote) {
     const quote = document.createElement('span');
@@ -181,7 +219,7 @@ async function saveInk(blockId, strokes) {
   const quote = (block ? block.text : '').slice(0, QUOTE_LENGTH);
   await request(`/api/docs/${state.name}/ink/${blockId}`, {
     method: 'PUT',
-    body: JSON.stringify({ quote, strokes }),
+    body: JSON.stringify({ quote, strokes, author: 'go' }),
   });
   await load();
 }

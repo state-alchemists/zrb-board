@@ -144,15 +144,24 @@ class Store:
         self._write_annotations(name, [*annotations, annotation])
         return annotation
 
-    def set_ink(self, name: str, block: str, quote: str, strokes: list[dict]) -> dict:
-        """Replace the ink drawn on one block; erasing the last stroke removes the note."""
+    def set_ink(
+        self,
+        name: str,
+        block: str,
+        quote: str,
+        strokes: list[dict],
+        author: str = INK_AUTHOR,
+    ) -> dict:
+        """Replace the ink *this author* drew on one block, leaving the other's alone."""
         self.read(name)
         annotations = self.annotations(name)
         existing = next(
             (
                 annotation
                 for annotation in annotations
-                if annotation.get("kind") == INK_KIND and annotation.get("block") == block
+                if annotation.get("kind") == INK_KIND
+                and annotation.get("block") == block
+                and annotation.get("author") == author
             ),
             None,
         )
@@ -168,7 +177,7 @@ class Store:
             "start": 0,
             "end": 0,
             "note": "",
-            "author": INK_AUTHOR,
+            "author": author,
             "strokes": strokes,
             "created": _now(),
             "resolved": False,

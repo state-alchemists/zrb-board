@@ -95,6 +95,24 @@ def test_should_not_create_an_ink_note_for_an_empty_erase(store):
     assert store.annotations("0001-question") == []
 
 
+def test_should_let_each_author_keep_their_own_ink_on_one_block(store):
+    store.create("0001-question", "# Q\n\ntext\n")
+    store.set_ink("0001-question", "b_1", "text", [_stroke(0.0)], "go")
+    store.set_ink("0001-question", "b_1", "text", [_stroke(0.5)], "tara")
+    inks = [item for item in store.annotations("0001-question") if item["kind"] == "ink"]
+    assert sorted(item["author"] for item in inks) == ["go", "tara"]
+    assert all(len(item["strokes"]) == 1 for item in inks)
+
+
+def test_should_erase_only_the_erasing_author_s_ink(store):
+    store.create("0001-question", "# Q\n\ntext\n")
+    store.set_ink("0001-question", "b_1", "text", [_stroke(0.0)], "go")
+    store.set_ink("0001-question", "b_1", "text", [_stroke(0.5)], "tara")
+    store.set_ink("0001-question", "b_1", "text", [], "go")
+    inks = [item for item in store.annotations("0001-question") if item["kind"] == "ink"]
+    assert [item["author"] for item in inks] == ["tara"]
+
+
 def _stroke(offset: float) -> dict:
     return {"points": [{"x": offset, "y": 0.0}, {"x": offset + 0.1, "y": 0.2}], "color": "#c0392b"}
 

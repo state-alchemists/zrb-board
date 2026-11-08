@@ -53,12 +53,24 @@ an `.excalidraw` export is a projection made at export time, not the truth.
 ## Drawing and editing
 
 `draw` turns the page into a surface: drag to ink, `erase` removes one stroke
-at a time. Both are saved against the block you started the stroke on, and the
-text digest reports them as `✎ 3 strokes, no note` so the agent knows a drawing
-exists without seeing pixels.
+at a time — a click within 10px of a stroke, not a click on the ink itself.
+Ink is kept per author, so a drawing of yours and one of mine can sit on the
+same paragraph without either replacing the other. Erasing the last stroke
+deletes that author's note on the block rather than leaving a hollow one.
 
 `edit markdown` puts the raw file in a textarea; `save` (or Cmd/Ctrl-S) writes
 it back with the revision you read.
+
+## Diagrams
+
+A ` ```mermaid ` fence is drawn in place by a vendored `mermaid.min.js` — no
+network at render time. A diagram that fails to parse stays a code block with
+the error on hover, because a blank is worse than its source.
+
+The pen and the diagram are different tools on purpose: ink is geometry pinned
+to a block and nobody can edit it, while a diagram is text that both authors
+can change. Reach for the pen when words run out; reach for the fence when the
+shape itself is the argument.
 
 ## API
 

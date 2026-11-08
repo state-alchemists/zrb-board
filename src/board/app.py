@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 
 from board import anchors, digest, render
 from board.render import Block
-from board.store import Doc, DocNotFound, RevConflict, Store
+from board.store import Doc, DocNotFound, INK_AUTHOR, RevConflict, Store
 
 STATIC_DIR = Path(__file__).parent / "static"
 DEFAULT_PORT = 8765
@@ -41,6 +41,7 @@ class InboxBody(BaseModel):
 class InkBody(BaseModel):
     quote: str = ""
     strokes: list[dict] = Field(default_factory=list)
+    author: str = INK_AUTHOR
 
 
 def default_root() -> Path:
@@ -156,7 +157,7 @@ def _register_routes(app: FastAPI, store: Store) -> None:
     @app.put("/api/docs/{name}/ink/{block}")
     def draw_on_block(name: str, block: str, body: InkBody) -> dict:
         try:
-            return store.set_ink(name, block, body.quote, body.strokes)
+            return store.set_ink(name, block, body.quote, body.strokes, body.author)
         except DocNotFound:
             raise _not_found(name) from None
 

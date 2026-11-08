@@ -128,6 +128,20 @@ body.drawing #article .block.annotated {
   background: none;
 }
 
+#article .diagram {
+  margin: 1.25rem 0;
+  padding: 0.75rem;
+  border: 1px solid #eee8db;
+  border-radius: 8px;
+  background: #fffdf8;
+  overflow-x: auto;
+  text-align: center;
+}
+
+#article pre.diagram-failed {
+  border-left: 3px solid #c96a4a;
+}
+
 #article .block.annotated {
   background: linear-gradient(transparent 92%, #f6e6b8 92%);
 }
