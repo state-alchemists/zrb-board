@@ -3,8 +3,10 @@ import test from 'node:test';
 
 import {
   distanceToPolyline,
+  distanceToRect,
   distanceToSegment,
   ellipseOutline,
+  nearestRectIndex,
   nearestStrokeIndex,
   outlinePoints,
   project,
@@ -135,4 +137,24 @@ test('a box and a circle report their outlines in normalised coordinates', () =>
 
 test('an old pen stroke with no tool is still treated as a pen stroke', () => {
   assert.deepEqual(outlinePoints({ points: [{ x: 0, y: 0 }] }), [{ x: 0, y: 0 }]);
+});
+
+test('a point inside a block is zero away from it', () => {
+  assert.equal(distanceToRect({ x: 200, y: 220 }, BLOCK), 0);
+});
+
+test('a point in the margin is its distance from the nearest edge', () => {
+  assert.equal(distanceToRect({ x: 90, y: 220 }, BLOCK), 10);
+  assert.equal(distanceToRect({ x: 200, y: BLOCK.top + BLOCK.height + 30 }, BLOCK), 30);
+});
+
+test('a drag that starts in the margin belongs to the block beside it', () => {
+  const lower = { left: 100, top: 300, width: 400, height: 50 };
+  const rects = [BLOCK, lower];
+  assert.equal(nearestRectIndex({ x: 60, y: 220 }, rects, 48), 0);
+  assert.equal(nearestRectIndex({ x: 60, y: 330 }, rects, 48), 1);
+});
+
+test('a drag that starts far from every block belongs to none', () => {
+  assert.equal(nearestRectIndex({ x: 200, y: 900 }, [BLOCK], 48), -1);
 });

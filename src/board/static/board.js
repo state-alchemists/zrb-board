@@ -1,9 +1,17 @@
-import { nearestStrokeIndex, project, toNormalized, toPath } from './coords.js';
+import {
+  nearestRectIndex,
+  nearestStrokeIndex,
+  project,
+  toNormalized,
+  toPath,
+} from './coords.js';
 
 const POLL_MS = 2000;
 const INK_COLOUR = '#c0392b';
 const INK_WIDTH = 2;
 const ERASE_TOLERANCE = 10;
+const BLOCK_REACH = 48; // how far outside a block a drag may start and still belong to it
+const INK_GUTTER = { left: 200, bottom: 160 }; // drawing room beside and below the words
 const QUOTE_LENGTH = 80;
 const OWNER = 'go'; // the browser is always Go's hand
 const SAME_POINT = 1e-4;
@@ -180,12 +188,20 @@ function renderOrphans(container, annotations) {
 
 /* --- ink ---------------------------------------------------------------- */
 
+/* The drawing surface reaches past the words on purpose: an arrow pointing at a
+   paragraph starts in the white space beside it, and a drag that begins there
+   has to reach the same overlay as one that begins on the text. The gutter is
+   on the left and below only — to the right sits the margin of notes, and a
+   surface that swallowed clicks there would make the notes unclickable.
+
+   No viewBox: one user unit is one CSS pixel, so `project` can subtract the
+   overlay's own offset and be done. */
 function sizeInk() {
   const article = document.querySelector('#article');
   const overlay = ink();
-  overlay.setAttribute('width', article.offsetWidth);
-  overlay.setAttribute('height', article.offsetHeight);
-  overlay.setAttribute('viewBox', `0 0 ${article.offsetWidth} ${article.offsetHeight}`);
+  overlay.style.left = `${-INK_GUTTER.left}px`;
+  overlay.setAttribute('width', article.offsetWidth + INK_GUTTER.left);
+  overlay.setAttribute('height', article.offsetHeight + INK_GUTTER.bottom);
 }
 
 function renderInk(annotations) {
@@ -286,10 +302,23 @@ function arrowHead(from, to) {
 
 function blockUnder(clientX, clientY) {
   const overlay = ink();
+  const previous = overlay.style.pointerEvents;
   overlay.style.pointerEvents = 'none';
   const element = document.elementFromPoint(clientX, clientY);
-  overlay.style.pointerEvents = 'auto';
-  return element ? element.closest('[data-block]') : null;
+  overlay.style.pointerEvents = previous;
+  const block = element ? element.closest('[data-block]') : null;
+  return block || nearestBlock(clientX, clientY);
+}
+
+/* A drag often starts in the white space beside a paragraph rather than on its
+   words, which is exactly where an arrow pointing at it begins. When the point
+   hits no block, the mark belongs to the block whose box is nearest — as long
+   as it is close enough to have been meant. */
+function nearestBlock(clientX, clientY) {
+  const nodes = Array.from(document.querySelectorAll('#article [data-block]'));
+  const rects = nodes.map((node) => node.getBoundingClientRect());
+  const index = nearestRectIndex({ x: clientX, y: clientY }, rects, BLOCK_REACH);
+  return index < 0 ? null : nodes[index];
 }
 
 function ownInkFor(blockId) {
@@ -535,32 +564,51 @@ async function notify() {
     method: 'POST',
     body: JSON.stringify({ text: `board: ${state.name}` }),
   });
-  toast('marked — read on my next turn');
+  toast('marked — read before my next message');
 }
 
 /* --- wiring ------------------------------------------------------------- */
 
+/* A handler that fails silently is indistinguishable from a tool that does not
+   work. Every pointer and button path goes through this, so an exception ends
+   up on the page instead of in a console nobody is looking at. */
+function guarded(handler) {
+  return (event) => {
+    try {
+      const result = handler(event);
+      if (result && typeof result.catch === 'function') result.catch(reportError);
+    } catch (error) {
+      reportError(error);
+    }
+  };
+}
+
+function reportError(error) {
+  const detail = error && error.message ? error.message : String(error);
+  showBanner(`that did not go through: ${detail}`);
+}
+
 function wire() {
   const overlay = ink();
   document.addEventListener('mouseup', onSelection);
-  overlay.addEventListener('pointerdown', beginMark);
-  overlay.addEventListener('pointermove', extendMark);
-  overlay.addEventListener('pointerup', endMark);
-  overlay.addEventListener('pointercancel', endMark);
+  overlay.addEventListener('pointerdown', guarded(beginMark));
+  overlay.addEventListener('pointermove', guarded(extendMark));
+  overlay.addEventListener('pointerup', guarded(endMark));
+  overlay.addEventListener('pointercancel', guarded(endMark));
   for (const button of document.querySelectorAll('#tools button')) {
-    button.addEventListener('click', () => setTool(button.dataset.tool));
+    button.addEventListener('click', guarded(() => setTool(button.dataset.tool)));
   }
-  document.querySelector('#draw').addEventListener('click', () => setDrawing(!state.drawing));
-  document.querySelector('#edit').addEventListener('click', () => setEditing(!state.editing));
-  document.querySelector('#save').addEventListener('click', save);
-  document.querySelector('#notify').addEventListener('click', notify);
-  document.querySelector('#compose-save').addEventListener('click', submitCompose);
+  document.querySelector('#draw').addEventListener('click', guarded(() => setDrawing(!state.drawing)));
+  document.querySelector('#edit').addEventListener('click', guarded(() => setEditing(!state.editing)));
+  document.querySelector('#save').addEventListener('click', guarded(save));
+  document.querySelector('#notify').addEventListener('click', guarded(notify));
+  document.querySelector('#compose-save').addEventListener('click', guarded(submitCompose));
   document.querySelector('#compose-cancel').addEventListener('click', hideCompose);
   document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') hideCompose();
     if ((event.metaKey || event.ctrlKey) && event.key === 's' && state.editing) {
       event.preventDefault();
-      save();
+      guarded(save)();
     }
   });
   window.addEventListener('resize', () => renderInk(state.doc ? state.doc.annotations : []));

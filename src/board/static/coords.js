@@ -112,3 +112,31 @@ export function nearestStrokeIndex(point, strokes, blockRect, tolerance) {
   });
   return bestIndex;
 }
+
+/* How far outside a box's edge a point lies, zero while it is inside. The box
+   is read from `left`/`top`/`width`/`height`, which both a DOMRect and a plain
+   object carry. */
+export function distanceToRect(point, rect) {
+  const right = rect.left + rect.width;
+  const bottom = rect.top + rect.height;
+  const dx = Math.max(rect.left - point.x, 0, point.x - right);
+  const dy = Math.max(rect.top - point.y, 0, point.y - bottom);
+  return Math.hypot(dx, dy);
+}
+
+/* The index of the nearest box within `reach` pixels, or -1. A mark has to be
+   allowed to begin in the margin beside a paragraph — that is where an arrow
+   pointing at it starts — so a miss on the words is judged by distance rather
+   than by which element the pointer happened to land on. */
+export function nearestRectIndex(point, rects, reach) {
+  let bestIndex = -1;
+  let bestDistance = reach;
+  rects.forEach((rect, index) => {
+    const distance = distanceToRect(point, rect);
+    if (distance <= bestDistance) {
+      bestDistance = distance;
+      bestIndex = index;
+    }
+  });
+  return bestIndex;
+}

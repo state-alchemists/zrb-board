@@ -87,11 +87,11 @@ shape itself is the argument.
 | `POST /api/docs/{name}/annotations` | `{block, quote, note, author, start, end}` |
 | `POST /api/docs/{name}/annotations/{id}/resolve` | close a note |
 | `PUT /api/docs/{name}/ink/{block}` | `{quote, strokes}` — replace the strokes drawn on one block |
-| `GET`/`POST /api/inbox` | the "mark for Tara" marker |
+| `GET`/`POST /api/inbox` | the "Mark for next message" marker |
 
 ## The button is a note, not a bell
 
-"mark for Tara" appends a line to `.board/inbox.md`. It cannot wake the agent —
+"Mark for next message" appends a line to `.board/inbox.md`. It cannot wake the agent —
 the agent runs when it is spoken to. The marker waits for the next turn, and
 the convention is that the word `board` in a message means: read the inbox,
 then read the state of the open documents.

@@ -15,7 +15,7 @@ flowchart TD
   N --> A
   P -->|ink| K[strokes, block-local, per author]
   K --> A
-  G -->|mark for Tara| I[(.board/inbox.md)]
+  G -->|mark for next message| I[(.board/inbox.md)]
   I -->|a zrb trigger yields a turn| T
 ```
 
@@ -108,9 +108,19 @@ Ink is stored **per block and per author**. The first version keyed ink by
 block alone, and an agent drawing one arrow erased the human's underline. Two
 authors, two marks.
 
+A mark may also begin in the white space beside a paragraph, because that is
+where an arrow pointing at it starts. The drawing surface reaches two hundred
+pixels into the left gutter and a hundred and sixty below the last line, and a
+press that lands on no block belongs to the block nearest it within
+forty-eight pixels. Beyond that the drag is ignored rather than guessed at —
+a mark filed against the wrong paragraph is worse than one that did not
+happen. The first version had neither rule, so a drag that began in the margin
+did nothing at all, which reads as a broken tool rather than a considered
+refusal.
+
 ## 7. The nudge is a trigger, not a queue
 
-The "mark for Tara" button appends a line to `.board/inbox.md` and nothing
+The "mark for next message" button appends a line to `.board/inbox.md` and nothing
 more — a browser cannot make an agent take a turn.
 
 The mechanism that can is zrb's trigger: a generator registered on the chat
