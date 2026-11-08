@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  DEFAULT_TEXT_RATIO,
   distanceToPolyline,
   distanceToRect,
   distanceToSegment,
@@ -11,6 +12,7 @@ import {
   outlinePoints,
   project,
   rectOutline,
+  textSize,
   toAbsolute,
   toNormalized,
   toPath,
@@ -157,4 +159,18 @@ test('a drag that starts in the margin belongs to the block beside it', () => {
 
 test('a drag that starts far from every block belongs to none', () => {
   assert.equal(nearestRectIndex({ x: 200, y: 900 }, [BLOCK], 48), -1);
+});
+
+test('a word defaults to a share of its paragraph', () => {
+  assert.equal(textSize(undefined, 40, 8, 120), 18);
+});
+
+test('a word keeps the size it was given, scaled to the block', () => {
+  assert.equal(textSize(1, 20, 8, 120), 20);
+  assert.equal(textSize(1, 40, 8, 120), 40);
+});
+
+test('a word never grows past the guard rails', () => {
+  assert.equal(textSize(5, 40, 8, 120), 120);
+  assert.equal(textSize(0.01, 10, 8, 120), 8);
 });

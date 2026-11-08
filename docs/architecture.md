@@ -184,11 +184,15 @@ A stroke — the unit of ink, whatever shape it draws:
 { "tool": "arrow",   "from": {…}, "to": {…} }
 { "tool": "rect",    "from": {…}, "to": {…} }
 { "tool": "ellipse", "from": {…}, "to": {…} }
-{ "tool": "text",    "at": {…}, "text": "words" }
+{ "tool": "text",    "at": {…}, "text": "words", "size": 0.45 }
 ```
 
 All coordinates are fractions of the block's box at the moment of drawing, so
-the same numbers re-project onto whatever the block has become since.
+the same numbers re-project onto whatever the block has become since. A word is
+no exception: its `size` is a fraction of the block's height too — forty-five
+hundredths by default, moved two pixels at a time in the compose box — so the
+words grow and shrink with the paragraph they were written beside, rather than
+staying put while everything around them reflows.
 
 ## 9. Known limits
 

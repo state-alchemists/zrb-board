@@ -113,6 +113,17 @@ export function nearestStrokeIndex(point, strokes, blockRect, tolerance) {
   return bestIndex;
 }
 
+/* The size of a word, in pixels. A text mark may carry its own `size` as a
+   fraction of the block's height -- the same unit as every other coordinate,
+   so the words grow and shrink with the paragraph they were written beside --
+   and this turns that fraction into the number the browser actually draws. */
+export const DEFAULT_TEXT_RATIO = 0.45;
+
+export function textSize(ratio, blockHeight, minimum, maximum) {
+  const wanted = (ratio ?? DEFAULT_TEXT_RATIO) * blockHeight;
+  return Math.max(minimum, Math.min(maximum, wanted));
+}
+
 /* How far outside a box's edge a point lies, zero while it is inside. The box
    is read from `left`/`top`/`width`/`height`, which both a DOMRect and a plain
    object carry. */

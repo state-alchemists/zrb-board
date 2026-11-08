@@ -319,6 +319,37 @@ body.editing #editor {
   margin-top: 0.5rem;
 }
 
+#compose .size-row {
+  display: none;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0.4rem;
+  margin-top: 0.4rem;
+  color: #6b6257;
+}
+
+#compose.with-size .size-row {
+  display: flex;
+}
+
+#compose .size-row button {
+  padding: 0.1rem 0.45rem;
+  font-size: 0.78rem;
+}
+
+#compose .size-label {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #a2988a;
+}
+
+#size-readout {
+  min-width: 3.2rem;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
 #docs {
   max-width: 44rem;
   margin: 0 auto;

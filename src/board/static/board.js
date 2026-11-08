@@ -1,7 +1,9 @@
 import {
+  DEFAULT_TEXT_RATIO,
   nearestRectIndex,
   nearestStrokeIndex,
   project,
+  textSize,
   toNormalized,
   toPath,
 } from './coords.js';
@@ -15,9 +17,9 @@ const INK_GUTTER = { left: 200, bottom: 160 }; // drawing room beside and below 
 const QUOTE_LENGTH = 80;
 const OWNER = 'go'; // the browser is always Go's hand
 const SAME_POINT = 1e-4;
-const TEXT_RATIO = 0.45;
-const TEXT_MIN = 12;
-const TEXT_MAX = 40;
+const TEXT_MIN = 8; // guard rails, not the size control: the words tool moves in TEXT_STEP_PX
+const TEXT_MAX = 120;
+const TEXT_STEP_PX = 2;
 const SVG = 'http://www.w3.org/2000/svg';
 const TOOLS = ['pen', 'line', 'arrow', 'rect', 'ellipse', 'text', 'erase'];
 
@@ -271,7 +273,7 @@ function shapeElement(shape, blockRect, overlayRect) {
   }
   const at = project(shape.at || { x: 0, y: 0 }, blockRect, overlayRect);
   const words = document.createElementNS(SVG, 'text');
-  const size = Math.max(TEXT_MIN, Math.min(TEXT_MAX, TEXT_RATIO * blockRect.height));
+  const size = textSize(shape.size, blockRect.height, TEXT_MIN, TEXT_MAX);
   words.setAttribute('x', String(at.x));
   words.setAttribute('y', String(at.y));
   words.setAttribute('font-size', String(size));
@@ -498,9 +500,10 @@ async function save() {
 
 /* --- composing ---------------------------------------------------------- */
 
-function showCompose(clientX, clientY, placeholder) {
+function showCompose(clientX, clientY, placeholder, withSize = false) {
   const compose = document.querySelector('#compose');
   compose.classList.add('visible');
+  compose.classList.toggle('with-size', withSize);
   const frame = compose.getBoundingClientRect();
   const left = Math.min(clientX, window.innerWidth - frame.width - 24);
   compose.style.left = `${Math.max(24, left)}px`;
@@ -517,8 +520,29 @@ function hideCompose() {
 }
 
 function openTextCompose(blockId, at, event) {
-  state.compose = { mode: 'text', blockId, at };
-  showCompose(event.clientX, event.clientY, 'words to put on the page');
+  const rect = liveRect(blockId, { height: 0 });
+  state.compose = { mode: 'text', blockId, at, rect, size: DEFAULT_TEXT_RATIO };
+  showCompose(event.clientX, event.clientY, 'words to put on the page', true);
+  showSize();
+}
+
+/* The size is stored as a fraction of the block, but it is set in pixels: the
+   readout says what the words will actually measure, and two pixels at a time
+   is about as fine as anyone wants to press. */
+function showSize() {
+  const compose = state.compose;
+  if (!compose || compose.mode !== 'text') return;
+  const pixels = textSize(compose.size, compose.rect.height, TEXT_MIN, TEXT_MAX);
+  document.querySelector('#size-readout').textContent = `${Math.round(pixels)} px`;
+}
+
+function stepSize(pixels) {
+  const compose = state.compose;
+  if (!compose || compose.mode !== 'text' || !compose.rect.height) return;
+  const current = textSize(compose.size, compose.rect.height, TEXT_MIN, TEXT_MAX);
+  const next = Math.max(TEXT_MIN, Math.min(TEXT_MAX, current + pixels));
+  compose.size = next / compose.rect.height;
+  showSize();
 }
 
 function selectionBlock(range) {
@@ -557,7 +581,14 @@ async function submitCompose() {
   hideCompose();
 
   if (compose.mode === 'text') {
-    const shape = { tool: 'text', at: compose.at, text, color: INK_COLOUR, width: INK_WIDTH };
+    const shape = {
+      tool: 'text',
+      at: compose.at,
+      size: compose.size,
+      text,
+      color: INK_COLOUR,
+      width: INK_WIDTH,
+    };
     const existing = ownInkFor(compose.blockId);
     await saveInk(compose.blockId, existing ? [...existing.strokes, shape] : [shape]);
     return;
@@ -623,6 +654,8 @@ function wire() {
   document.querySelector('#notify').addEventListener('click', guarded(notify));
   document.querySelector('#compose-save').addEventListener('click', guarded(submitCompose));
   document.querySelector('#compose-cancel').addEventListener('click', hideCompose);
+  document.querySelector('#size-smaller').addEventListener('click', guarded(() => stepSize(-TEXT_STEP_PX)));
+  document.querySelector('#size-bigger').addEventListener('click', guarded(() => stepSize(TEXT_STEP_PX)));
   document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') hideCompose();
     if ((event.metaKey || event.ctrlKey) && event.key === 's' && state.editing) {
