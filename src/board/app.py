@@ -22,8 +22,11 @@ STATIC_DIR = Path(__file__).parent / "static"
 def installed_version() -> str:
     """The version in the metadata, so the OpenAPI document cannot drift from pyproject.
 
-    A checkout that was never installed (`pip install -e .` skipped) has no metadata;
-    the app is still servable, so it says so rather than refusing to start.
+    The metadata is the version that is *installed*, which is the one running: a
+    `pip install zrb-board` always matches its wheel. An editable checkout keeps the
+    version it was installed as until it is reinstalled, and one that was never installed
+    has none at all -- the app is still servable, so it says 0.0.0 rather than refusing to
+    start.
     """
     try:
         return package_version("zrb-board")
