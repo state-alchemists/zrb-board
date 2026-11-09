@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as package_version
 from pathlib import Path
 
 import uvicorn
@@ -15,6 +17,18 @@ from board.render import Block
 from board.store import Doc, DocNotFound, INK_AUTHOR, RevConflict, Store
 
 STATIC_DIR = Path(__file__).parent / "static"
+
+
+def installed_version() -> str:
+    """The version in the metadata, so the OpenAPI document cannot drift from pyproject.
+
+    A checkout that was never installed (`pip install -e .` skipped) has no metadata;
+    the app is still servable, so it says so rather than refusing to start.
+    """
+    try:
+        return package_version("zrb-board")
+    except PackageNotFoundError:
+        return "0.0.0"
 
 
 class WriteBody(BaseModel):
@@ -99,7 +113,7 @@ def create_app(root: Path | None = None) -> FastAPI:
     else:
         store = Store(root)
     store.ensure_layout()
-    app = FastAPI(title="zrb-board", version="0.1.0")
+    app = FastAPI(title="zrb-board", version=installed_version())
     _register_routes(app, store)
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
     return app
