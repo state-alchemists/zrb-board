@@ -11,18 +11,14 @@ on:
 
 jobs:
   review:
-    # Two guards, both about the key. A `pull_request_target` run holds the secrets
-    # whatever the pull request's origin, so the association test is the barrier
-    # that keeps a drive-by pull request from spending tokens, and the head-repo
-    # test keeps fork runs out entirely -- which is also what makes the review's
-    # cost predictable. The head-repo test is the stricter of the two, because
-    # author_association reports a private org membership as CONTRIBUTOR; both are
-    # written out so neither reads as redundant to whoever edits this next.
-    if: >-
-      (github.event.pull_request.author_association == 'OWNER' ||
-       github.event.pull_request.author_association == 'MEMBER' ||
-       github.event.pull_request.author_association == 'COLLABORATOR') &&
-      github.event.pull_request.head.repo.full_name == github.repository
+    # Same-repository branches only, since pushing one takes write access. A
+    # `pull_request_target` run holds the secrets whatever the pull request's origin, so
+    # this one test is the boundary: a fork's head repo is the fork, and a branch in this
+    # repository cannot exist without write access. zrb's workflow also tests
+    # `author_association`, which is narrower than this rather than additional to it -- a
+    # private org membership reads as CONTRIBUTOR there -- so copying it would only skip
+    # reviews this job could safely run.
+    if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-26.04
     timeout-minutes: 30
     permissions:
