@@ -26,7 +26,6 @@ jobs:
       pull-requests: write
     env:
       ZRB_LLM_MODEL: ${{ secrets.ZRB_LLM_MODEL || vars.ZRB_LLM_MODEL }}
-      ZRB_LLM_JOURNAL_ENABLED: "false"
       ZRB_INIT_STRICT: "1"
     steps:
       - name: Check out the base branch
