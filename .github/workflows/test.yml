@@ -61,4 +61,6 @@ jobs:
         run: python -m pytest -q
 
       - name: Test the pen
-        run: node --test "tests-js/*.test.js"
+        # Unquoted: node 20's test runner does not expand a pattern itself, and the
+        # shell already did it before node was asked.
+        run: node --test tests-js/*.test.js
