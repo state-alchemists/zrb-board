@@ -1,0 +1,77 @@
+name: "Code Review"
+run-name: "Review PR #${{ github.event.pull_request.number }} by ${{ github.actor }}"
+
+# `pull_request_target`, not `pull_request`: this file, and the checkout, resolve
+# from the base branch, so a PR cannot edit the workflow that runs with
+# OPENAI_API_KEY. The head is fetched as a diff and never checked out.
+on:
+  pull_request_target:
+    branches:
+      - main
+
+jobs:
+  review:
+    # Two guards, both about the key. A `pull_request_target` run holds the secrets
+    # whatever the pull request's origin, so the association test is the barrier
+    # that keeps a drive-by pull request from spending tokens, and the head-repo
+    # test keeps fork runs out entirely -- which is also what makes the review's
+    # cost predictable. The head-repo test is the stricter of the two, because
+    # author_association reports a private org membership as CONTRIBUTOR; both are
+    # written out so neither reads as redundant to whoever edits this next.
+    if: >-
+      (github.event.pull_request.author_association == 'OWNER' ||
+       github.event.pull_request.author_association == 'MEMBER' ||
+       github.event.pull_request.author_association == 'COLLABORATOR') &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      pull-requests: write
+    env:
+      ZRB_LLM_MODEL: ${{ secrets.ZRB_LLM_MODEL || vars.ZRB_LLM_MODEL }}
+      ZRB_LLM_JOURNAL_ENABLED: "false"
+      ZRB_INIT_STRICT: "1"
+    steps:
+      - name: Check out the base branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.base.ref }}
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      # Pinned, in the spirit of zrb's review container: the same diff reviewed twice
+      # runs the same reviewer, not whatever PyPI served that morning. This step holds
+      # no secret -- the key is declared on the step below -- so a compromised package
+      # install finds nothing to read. Transitive dependencies are still whatever PyPI
+      # resolves; hashes would close that too, at the cost of editing them by hand.
+      - name: Install the reviewer
+        run: pip install "zrb==3.37.0" "requests==2.34.2"
+
+      # The command is fixed here rather than an `eval` of a workflow input, so no
+      # event data can reach a shell that holds the key.
+      - name: Review and comment
+        shell: bash
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          if [ -z "$OPENAI_API_KEY" ]; then
+            echo "⏭️  OPENAI_API_KEY is not configured; skipping the LLM review."
+            exit 0
+          fi
+          git fetch --no-tags origin \
+            "+refs/pull/${{ github.event.pull_request.number }}/head:refs/remotes/origin/pr-head"
+          # The review prints file contents, and the runner executes log lines that
+          # look like workflow commands; between the markers it reads plain text.
+          stop_token="$(cat /proc/sys/kernel/random/uuid)"
+          echo "::stop-commands::$stop_token"
+          status=0
+          zrb submit-comment --range "origin/$GITHUB_BASE_REF...origin/pr-head" || status=$?
+          echo "::$stop_token::"
+          exit "$status"
