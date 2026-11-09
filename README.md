@@ -134,3 +134,9 @@ line carrying the unread count — and is deliberately not built here yet.
 .venv/bin/python -m pytest -q      # storage, anchors, digest, routes
 npm test                           # pen coordinate maths (node --test)
 ```
+
+Both suites run in CI on four Pythons and on macOS, and a pull request also gets a
+review posted on it — `zrb` reads the diff with the model key, from a workflow that
+`pull_request_target` resolves out of `main`, so a branch cannot edit the reviewer that
+looks at it. `test_ci.py` is what keeps those workflows pinned to commits and to named
+runner images.
