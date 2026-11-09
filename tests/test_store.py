@@ -17,7 +17,7 @@ def test_should_advance_the_revision_when_the_text_changes(store):
 
 
 def test_should_refuse_a_stale_write_and_hand_back_the_current_text(store):
-    doc = store.create("0001-question", "# Q\n\ntext\n")
+    store.create("0001-question", "# Q\n\ntext\n")
     with pytest.raises(RevConflict) as caught:
         store.write("0001-question", "# Q\n\nclobbered\n", "000000000000")
     assert caught.value.markdown == "# Q\n\ntext\n"

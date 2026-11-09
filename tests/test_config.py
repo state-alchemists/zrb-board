@@ -1,5 +1,3 @@
-import pytest
-
 from board import config
 
 

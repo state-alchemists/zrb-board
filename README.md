@@ -11,7 +11,17 @@ The agent does not watch the page. It reads `/api/docs/<name>/state.md`, a
 plain-text view of the document with every note placed inline, and writes back
 with a revision-checked `PUT`. Turns are the clock; the browser is a window.
 
-## Run it
+## Install
+
+```bash
+pip install zrb-board
+zrb-board          # http://127.0.0.1:8765
+```
+
+The wheel carries the page — the CSS, the pen and the vendored Mermaid bundle — so an
+installed board draws diagrams with no network at render time.
+
+## Run it from a checkout
 
 ```bash
 cd ~/zrb-board
