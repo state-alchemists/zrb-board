@@ -12,9 +12,12 @@ import json
 import os
 import re
 import tempfile
+import threading
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import Iterator
 
 NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 REV_LENGTH = 12
@@ -99,6 +102,24 @@ class Store:
         self.docs_dir = docs_dir or root / "docs"
         self.meta_dir = meta_dir or root / ".board"
         self.inbox_path = self.meta_dir / "inbox.md"
+        # One writer at a time. The routes are plain `def`s, so the server runs them on
+        # a threadpool and two requests can interleave a read with a write. Re-entrant,
+        # because a caller holds a transaction and the store's own methods take it again.
+        # It is per process: a board run with several workers would need a file lock, and
+        # this one is run as a single process.
+        self._lock = threading.RLock()
+
+    @contextmanager
+    def transaction(self) -> Iterator[None]:
+        """Hold the board still while you read it, decide, and write back.
+
+        A revision cannot promise this on its own: a note is placed by rendering the
+        document, and the render is not a write, so an edit can land between the read and
+        the annotation. Inside a transaction nothing else in this process writes, and the
+        expected revision catches what writes from outside it -- an editor saving the file.
+        """
+        with self._lock:
+            yield
 
     def ensure_layout(self) -> None:
         self.docs_dir.mkdir(parents=True, exist_ok=True)
@@ -116,11 +137,12 @@ class Store:
         return Doc(name, markdown, content_rev(markdown), stamp)
 
     def write(self, name: str, markdown: str, rev: str) -> Doc:
-        current = self.read(name)
-        if current.rev != rev:
-            raise RevConflict(current.rev, current.markdown)
-        self._atomic_write(self._doc_path(name), markdown)
-        return self.read(name)
+        with self._lock:
+            current = self.read(name)
+            if current.rev != rev:
+                raise RevConflict(current.rev, current.markdown)
+            self._atomic_write(self._doc_path(name), markdown)
+            return self.read(name)
 
     def create(self, name: str, markdown: str) -> Doc:
         path = self._doc_path(name)
@@ -135,24 +157,35 @@ class Store:
             return []
         return json.loads(path.read_text(encoding="utf-8")).get("annotations", [])
 
-    def add_annotation(self, name: str, payload: dict) -> dict:
-        self.read(name)
-        annotations = self.annotations(name)
-        annotation = {
-            "id": _next_id(annotations),
-            "kind": NOTE_KIND,
-            "block": payload["block"],
-            "quote": payload["quote"],
-            "start": payload["start"],
-            "end": payload["end"],
-            "note": payload["note"],
-            "author": payload["author"],
-            "strokes": payload.get("strokes", []),
-            "created": _now(),
-            "resolved": False,
-        }
-        self._write_annotations(name, [*annotations, annotation])
-        return annotation
+    def add_annotation(
+        self, name: str, payload: dict, expected_rev: str | None = None
+    ) -> dict:
+        """Store a note. With *expected_rev*, refuse if the document has moved since.
+
+        The revision matters here because a note's block was found by reading the
+        document: if it changed between that read and this write, the block names a
+        passage the document no longer has, and the note would be born orphaned.
+        """
+        with self._lock:
+            doc = self.read(name)
+            if expected_rev is not None and doc.rev != expected_rev:
+                raise RevConflict(doc.rev, doc.markdown)
+            annotations = self.annotations(name)
+            annotation = {
+                "id": _next_id(annotations),
+                "kind": NOTE_KIND,
+                "block": payload["block"],
+                "quote": payload["quote"],
+                "start": payload["start"],
+                "end": payload["end"],
+                "note": payload["note"],
+                "author": payload["author"],
+                "strokes": payload.get("strokes", []),
+                "created": _now(),
+                "resolved": False,
+            }
+            self._write_annotations(name, [*annotations, annotation])
+            return annotation
 
     def set_ink(
         self,

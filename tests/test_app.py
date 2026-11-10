@@ -140,3 +140,30 @@ def test_should_say_where_a_quote_lands_and_store_it_in_one_request(client, stor
     missed = noted("not there")
     assert missed.status_code == 422 and "No block holds" in missed.json()["detail"]
     assert client.post("/api/docs/nope/notes", json={"quote": "x"}).status_code == 404
+
+
+def test_should_refuse_a_note_whose_document_moved_while_it_was_placed(
+    client, store, monkeypatch
+):
+    # Finding the block is a render, not a write, so a save can land between the read and
+    # the store. The note states the revision it was placed against; when the file is not
+    # that revision any more -- an editor saving it, outside this process -- the note is
+    # refused and the caller may look again, rather than being stored against a block the
+    # page no longer has.
+    from board import app as app_module
+
+    doc = store.create("0001-question", "# Q\n\nalpha\n")
+    real_locate = app_module.quoting.locate
+
+    def locating_through_an_edit(markdown, quote):
+        found = real_locate(markdown, quote)
+        store.write("0001-question", "# Q\n\nbeta\n", doc.rev)
+        return found
+
+    monkeypatch.setattr(app_module.quoting, "locate", locating_through_an_edit)
+    refused = client.post(
+        "/api/docs/0001-question/notes", json={"quote": "alpha", "note": "x"}
+    )
+    assert refused.status_code == 409
+    assert "changed" in refused.json()["detail"]
+    assert store.annotations("0001-question") == []

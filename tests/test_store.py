@@ -16,6 +16,31 @@ def test_should_advance_the_revision_when_the_text_changes(store):
     assert updated.rev == content_rev(updated.markdown)
 
 
+def test_should_refuse_a_note_when_the_document_moved_since_it_was_read(store):
+    # The block in the payload was found by reading the document; if the document has
+    # changed by the time the note is stored, that block may be gone.
+    doc = store.create("0001-question", "# Q\n\nalpha\n")
+    store.write("0001-question", "# Q\n\nbeta\n", doc.rev)
+    with pytest.raises(RevConflict):
+        store.add_annotation(
+            "0001-question",
+            {"block": "b_1", "quote": "alpha", "start": 0, "end": 0, "note": "x", "author": "agent"},
+            expected_rev=doc.rev,
+        )
+    assert store.annotations("0001-question") == []
+
+
+def test_should_store_a_note_when_the_document_has_not_moved(store):
+    doc = store.create("0001-question", "# Q\n\nalpha\n")
+    stored = store.add_annotation(
+        "0001-question",
+        {"block": "b_1", "quote": "alpha", "start": 0, "end": 0, "note": "x", "author": "agent"},
+        expected_rev=doc.rev,
+    )
+    assert stored["id"] == "a1"
+    assert [one["id"] for one in store.annotations("0001-question")] == ["a1"]
+
+
 def test_should_refuse_a_stale_write_and_hand_back_the_current_text(store):
     store.create("0001-question", "# Q\n\ntext\n")
     with pytest.raises(RevConflict) as caught:
