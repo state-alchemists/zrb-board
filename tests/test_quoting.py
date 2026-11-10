@@ -44,6 +44,14 @@ def test_a_quote_with_a_reference_link_lands_on_its_words():
     assert quoting.locate(doc, "[zrb][ref]")[1] == "zrb"
 
 
+def test_a_definition_inside_a_code_fence_is_code_not_a_definition():
+    # markdown-it never registers a fenced line as a definition, so the page shows the
+    # reference literally -- and the quote, rendered with only the real definitions, says
+    # the same thing the page does.
+    doc = "# Q\n\nSee [zrb][ref] here.\n\n```\n[ref]: https://x.y\n```\n"
+    assert quoting.locate(doc, "See [zrb][ref] here.")[1] == "See [zrb][ref] here."
+
+
 def test_a_quote_over_two_blocks_is_refused_rather_than_shortened():
     two = "# Q\n\nAlpha paragraph.\n\nBeta paragraph.\n"
     said = quoting.locate(two, "Alpha paragraph.\n\nBeta paragraph.")

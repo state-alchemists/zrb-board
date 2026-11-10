@@ -72,6 +72,17 @@ def _block_id(text: str, seen: dict[str, int]) -> str:
     return f"b_{digest}{suffix}"
 
 
+def references(markdown: str) -> dict:
+    """The document's link reference definitions, as the parser resolved them.
+
+    Read out of the parser's environment rather than off the raw text: a line that looks
+    like a definition inside a code fence is code, and markdown-it never registers it.
+    """
+    env: dict = {}
+    _markdown().parse(markdown, env)
+    return env.get("references", {}) or {}
+
+
 def render(markdown: str) -> Rendered:
     md = _markdown()
     seen: dict[str, int] = {}
