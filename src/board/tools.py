@@ -279,16 +279,10 @@ def BoardNote(name: str, quote: str, note: str) -> str:
         holds whole; a quote that runs over two paragraphs is refused, not shortened.
       note: What to say about them.
     """
-    document = _json("POST", _document_path(name, "/quote"), {"quote": quote})
-    _json(
+    document = _json(
         "POST",
-        _document_path(name, "/annotations"),
-        {
-            "block": document["block"],
-            "quote": document["quote"],
-            "note": note,
-            "author": NOTE_AUTHOR,
-        },
+        _document_path(name, "/notes"),
+        {"quote": quote, "note": note, "author": NOTE_AUTHOR},
     )
     return f"Noted on block {document['block']}: {note}"
 

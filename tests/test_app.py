@@ -115,23 +115,28 @@ def test_should_answer_404_when_removing_an_annotation_that_is_not_there(client,
     assert client.delete("/api/docs/0001-question/annotations/a9").status_code == 404
 
 
-def test_should_say_where_a_quote_lands_on_the_page(client, store):
-    # The tools ask this before writing a note: the quote may carry its markdown, and the
-    # board is the one reader that knows how that markdown becomes the page's words.
+def test_should_say_where_a_quote_lands_and_store_it_in_one_request(client, store):
+    # One request, because two would leave a window in which an edit moves the passage the
+    # quote was found on; the quote may carry its markdown, and the board renders it.
     store.create(
         "0001-question",
         "# Q\n\n| Name | Value |\n| --- | --- |\n| foo | bar |\n\nSee [zrb](https://x.y).\n",
     )
 
-    def landed(quote):
-        return client.post("/api/docs/0001-question/quote", json={"quote": quote}).json()
+    def noted(quote):
+        return client.post(
+            "/api/docs/0001-question/notes",
+            json={"quote": quote, "note": "here", "author": "tara"},
+        )
 
-    row = landed("| foo | bar |")
-    assert row["quote"] == "foo bar"
-    assert landed("See [zrb](https://x.y).")["quote"] == "See zrb ."
-    # Already in the page's words: a selection, or a quote copied after a wrap.
-    assert landed("foo bar")["quote"] == "foo bar"
+    row = noted("| foo | bar |")
+    assert row.status_code == 201
+    assert row.json()["quote"] == "foo bar"
+    assert noted("See [zrb](https://x.y).").json()["quote"] == "See zrb ."
+    assert noted("foo bar").json()["block"]
+    stored = client.get("/api/docs/0001-question").json()["annotations"]
+    assert len(stored) == 3 and all(not one["orphaned"] for one in stored)
     # Nothing holds it: 422 and a sentence saying so.
-    missed = client.post("/api/docs/0001-question/quote", json={"quote": "not there"})
+    missed = noted("not there")
     assert missed.status_code == 422 and "No block holds" in missed.json()["detail"]
-    assert client.post("/api/docs/nope/quote", json={"quote": "x"}).status_code == 404
+    assert client.post("/api/docs/nope/notes", json={"quote": "x"}).status_code == 404

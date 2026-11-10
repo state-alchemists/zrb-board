@@ -112,7 +112,7 @@ shape itself is the argument.
 | `GET /api/docs/{name}` | html, blocks, and annotations resolved to blocks |
 | `GET /api/docs/{name}/state.md` | **the text view the agent reads** |
 | `PUT /api/docs/{name}` | `{markdown, rev}` — 409 with the current text on a stale rev |
-| `POST /api/docs/{name}/quote` | `{quote}` — the block a quote lands on, and its words, rendered where it stands |
+| `POST /api/docs/{name}/notes` | `{quote, note, author}` — locate the quote and store the note in one request |
 | `POST /api/docs/{name}/annotations` | `{block, quote, note, author, start, end}` |
 | `POST /api/docs/{name}/annotations/{id}/resolve` | close a note |
 | `PUT /api/docs/{name}/ink/{block}` | `{quote, strokes}` — replace the strokes drawn on one block |

@@ -59,24 +59,24 @@ def test_the_source_view_is_the_document_itself(monkeypatch):
     assert tools.BoardRead("0001-question", source=True) == markdown
 
 
-def test_a_note_sends_what_the_board_located(monkeypatch):
-    # The tools do not read markdown; they ask where the quote lands and send that back.
+def test_a_note_is_one_request_to_the_board(monkeypatch):
+    # The tools do not read markdown and do not locate anything: the board does both, in
+    # the request that stores the note, so no edit can slip between the two.
     sent = []
 
     def fake_json(method, path, payload=None):
-        if path.endswith("/quote"):
-            return {"block": "b_1", "quote": "foo bar"}
-        sent.append((path, payload))
-        return {"id": "a1"}
+        sent.append((method, path, payload))
+        return {"id": "a1", "block": "b_1", "quote": "foo bar", "note": "the row"}
 
     monkeypatch.setattr(tools, "_json", fake_json)
     assert "b_1" in tools.BoardNote("0001-q", "| foo | bar |", "the row")
-    assert sent[0][1] == {
-        "block": "b_1",
-        "quote": "foo bar",
-        "note": "the row",
-        "author": tools.NOTE_AUTHOR,
-    }
+    assert sent == [
+        (
+            "POST",
+            "/api/docs/0001-q/notes",
+            {"quote": "| foo | bar |", "note": "the row", "author": tools.NOTE_AUTHOR},
+        )
+    ]
 
 
 def test_a_refused_quote_reaches_the_caller_as_a_sentence(monkeypatch):

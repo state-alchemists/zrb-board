@@ -53,8 +53,10 @@ class InboxBody(BaseModel):
     text: str = ""
 
 
-class QuoteBody(BaseModel):
+class NoteBody(BaseModel):
     quote: str = ""
+    note: str = ""
+    author: str = "agent"
 
 
 class InkBody(BaseModel):
@@ -200,14 +202,15 @@ def _register_routes(app: FastAPI, store: Store) -> None:
             raise _not_found(name) from None
         return digest.build_digest(doc, store.annotations(name))
 
-    @app.post("/api/docs/{name}/quote")
-    def locate_quote(name: str, body: QuoteBody) -> dict:
-        """Where a quote lands on the page: the block that holds it, and its words.
+    @app.post("/api/docs/{name}/notes", status_code=201)
+    def add_note(name: str, body: NoteBody) -> dict:
+        """A note from a quote: located and stored in the same request.
 
-        The agent's tools send a quote here -- copied out of the source with its markdown,
-        or seen on the page -- and get back the block it belongs to and the words that
-        block holds, which is what an annotation anchors to. Rendering, and so every
-        difference between the file and the page, stays on this side.
+        The quote may arrive with its markdown -- it is read from the source by an agent,
+        or seen on the page -- and it is located against the document as this request reads
+        it. Locating and storing are one call on purpose: two would leave a window in
+        which an edit moves the passage the quote was found on, and the note would land on
+        the wrong words or on none.
         """
         try:
             doc = store.read(name)
@@ -218,7 +221,17 @@ def _register_routes(app: FastAPI, store: Store) -> None:
             # 422: the quote was read fine, it is the passage that cannot be anchored.
             raise HTTPException(status_code=422, detail=found)
         block, words = found
-        return {"block": block, "quote": words}
+        return store.add_annotation(
+            name,
+            {
+                "block": block,
+                "quote": words,
+                "note": body.note,
+                "author": body.author,
+                "start": 0,
+                "end": 0,
+            },
+        )
 
     @app.get("/api/inbox", response_class=PlainTextResponse)
     def read_inbox() -> str:
