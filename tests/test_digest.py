@@ -56,3 +56,26 @@ def test_should_place_a_note_whose_source_line_carries_emphasis(store):
     doc = store.create("0001-question", "# Q\n\n**Go:** when words are not enough\n")
     text = digest.build_digest(doc, [_note("when words are not enough")])
     assert "## unplaced" not in text
+
+
+def test_should_place_a_note_whose_source_line_carries_a_link(store):
+    # A tool sends the block's visible words, which is what the page shows a link as:
+    # its text, never its url. The digest has to read the source line the same way.
+    doc = store.create("0001-question", "# Q\n\nSee [zrb](https://x.y) for more.\n")
+    text = digest.build_digest(doc, [_note("See zrb for more.")])
+    assert "## unplaced" not in text
+
+
+def test_should_place_a_note_on_a_heading_or_a_list_item(store):
+    doc = store.create("0001-question", "# Q\n\n## Options\n\n- one\n")
+    assert "## unplaced" not in digest.build_digest(
+        doc, [_note("Options"), _note("one")]
+    )
+
+
+def test_should_place_a_note_whose_line_carries_an_image(store):
+    # An image shows no words at all: the block's text loses the tag, so the quote a
+    # tool sends for that line has no image in it either.
+    doc = store.create("0001-question", "# Q\n\nBefore ![d](d.png) after\n")
+    text = digest.build_digest(doc, [_note("Before after")])
+    assert "## unplaced" not in text

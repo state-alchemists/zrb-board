@@ -14,31 +14,21 @@ signs a note, `agent` unless it is set.
 
 import json
 import os
-import re
 import urllib.error
 import urllib.parse
 import urllib.request
 from typing import Any
 
+from board.markup import visible as _visible
+
 BOARD_URL = os.environ.get("BOARD_URL", "http://127.0.0.1:8765").rstrip("/")
 REQUEST_TIMEOUT = 15
 NOTE_AUTHOR = os.environ.get("BOARD_AUTHOR", "agent")
 # A note anchors against a block's *visible* text, while `BoardRead` hands back the
-# markdown source (`render.plain_text`, `digest.build_digest`). So a quote copied out of
-# the read has to be turned back into the words on the page before it can match: bold,
-# emphasis, code, a link's url, a heading's hashes, a list's dash, and the note markers
-# the digest inserts between lines all have to go.
-_UNWRAP = (
-    (re.compile(r"!\[([^\]]*)\]\([^)]*\)"), r"\1"),  # image -> its alt text
-    (re.compile(r"\[([^\]]*)\]\([^)]*\)"), r"\1"),  # link -> its words, never its url
-    (re.compile(r"⟦[^⟧]*⟧"), ""),  # a note's own marker, inline
-    (re.compile(r"`+"), ""),
-    (re.compile(r"\*\*?([^*]+)\*\*?"), r"\1"),
-    (re.compile(r"~~([^~]+)~~"), r"\1"),
-    (re.compile(r"(?<!\w)__?([^_]+)__?(?!\w)"), r"\1"),  # `_x_`, not `snake_case`
-    (re.compile(r"^\s{0,3}(?:#{1,6}|[-*+]|\d+[.)]|>)\s+", re.M), ""),
-)
-_SPACE = re.compile(r"\s+")
+# markdown source (`render.plain_text`, `digest.build_digest`). `board.markup.visible` is
+# the one definition of that text, so a quote copied out of the read -- bold, a link's
+# url, a heading's hashes, a line break in the middle -- turns back into words the block
+# holds before it is matched.
 
 
 class BoardConflict(RuntimeError):
@@ -83,14 +73,6 @@ def _json(method: str, path: str, payload: dict | None = None) -> Any:
 
 def _document_path(name: str, suffix: str = "") -> str:
     return f"/api/docs/{urllib.parse.quote(name)}{suffix}"
-
-
-def _visible(quote: str) -> str:
-    """*quote* as the page shows it: no markdown, one space between the words."""
-    text = quote
-    for pattern, replacement in _UNWRAP:
-        text = pattern.sub(replacement, text)
-    return _SPACE.sub(" ", text).strip()
 
 
 def _held(block_text: str, needle: str) -> str | None:

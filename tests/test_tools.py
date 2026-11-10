@@ -32,6 +32,15 @@ def test_visible_drops_the_marker_a_note_leaves_between_lines():
     )
 
 
+def test_visible_drops_an_image_the_page_never_shows():
+    # The renderer loses the <img> tag and the alt text is not text on the page, so the
+    # block holds "Before after"; keeping the alt would anchor on "Before" alone.
+    assert tools._visible("Before ![diagram](d.png) after") == "Before after"
+    assert tools._block_holding(
+        [{"id": "a", "text": "Before after"}], "Before ![diagram](d.png) after"
+    ) == ({"id": "a", "text": "Before after"}, "Before after")
+
+
 def test_held_cuts_from_the_block_so_the_server_can_anchor_it():
     block = "Go: a sentence spanning two lines"
     quote = "**Go:** a sentence\nspanning two lines"

@@ -7,13 +7,9 @@ could not place under its own heading rather than guessing.
 
 from __future__ import annotations
 
-import re
-
+from board.markup import visible
 from board.store import Doc
 
-_SPACE = re.compile(r"\s+")
-# Inline markup: the quote comes from the rendered page, the line from the file.
-_INLINE = re.compile(r"[`*_~]")
 QUOTE_PREFIX = 24
 RESOLVED_MARK = " · resolved"
 
@@ -71,16 +67,17 @@ def _place(
 
 
 def _line_index(quote: str, lines: list[str]) -> int | None:
-    """The line holding the start of the quote, ignoring markdown syntax.
+    """The line holding the start of the quote, read the way the page reads it.
 
-    A quote arrives from rendered text, so it has no markup in it while the
-    source line may carry plenty — `**Go:** a sentence` must still match the
-    quote `Go: a sentence`.
+    A quote arrives as visible words -- from the page, or from a tool that turned the
+    markdown back into them -- while the source line carries the markup. `**Go:** a
+    sentence` must still match the quote `Go: a sentence`, and `See [zrb](https://x.y)`
+    must match `See zrb`; `visible()` reads both sides so they say the same thing.
     """
-    needle = _INLINE.sub("", _SPACE.sub(" ", quote)).strip()[:QUOTE_PREFIX]
+    needle = visible(quote)[:QUOTE_PREFIX]
     if not needle:
         return None
     for index, line in enumerate(lines):
-        if needle in _INLINE.sub("", _SPACE.sub(" ", line)):
+        if needle in visible(line):
             return index
     return None
