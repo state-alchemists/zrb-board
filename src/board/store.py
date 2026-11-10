@@ -145,11 +145,12 @@ class Store:
             return self.read(name)
 
     def create(self, name: str, markdown: str) -> Doc:
-        path = self._doc_path(name)
-        if path.exists():
-            raise DocExists(name)
-        self._atomic_write(path, markdown)
-        return self.read(name)
+        with self._lock:
+            path = self._doc_path(name)
+            if path.exists():
+                raise DocExists(name)
+            self._atomic_write(path, markdown)
+            return self.read(name)
 
     def annotations(self, name: str) -> list[dict]:
         path = self._annotation_path(name)
@@ -196,37 +197,38 @@ class Store:
         author: str = INK_AUTHOR,
     ) -> dict:
         """Replace the ink *this author* drew on one block, leaving the other's alone."""
-        self.read(name)
-        annotations = self.annotations(name)
-        existing = next(
-            (
-                annotation
-                for annotation in annotations
-                if annotation.get("kind") == INK_KIND
-                and annotation.get("block") == block
-                and annotation.get("author") == author
-            ),
-            None,
-        )
-        if existing is not None:
-            return self._rewrite_ink(name, annotations, existing, strokes)
-        if not strokes:
-            return {}
-        created = {
-            "id": _next_id(annotations),
-            "kind": INK_KIND,
-            "block": block,
-            "quote": quote,
-            "start": 0,
-            "end": 0,
-            "note": "",
-            "author": author,
-            "strokes": strokes,
-            "created": _now(),
-            "resolved": False,
-        }
-        self._write_annotations(name, [*annotations, created])
-        return created
+        with self._lock:
+            self.read(name)
+            annotations = self.annotations(name)
+            existing = next(
+                (
+                    annotation
+                    for annotation in annotations
+                    if annotation.get("kind") == INK_KIND
+                    and annotation.get("block") == block
+                    and annotation.get("author") == author
+                ),
+                None,
+            )
+            if existing is not None:
+                return self._rewrite_ink(name, annotations, existing, strokes)
+            if not strokes:
+                return {}
+            created = {
+                "id": _next_id(annotations),
+                "kind": INK_KIND,
+                "block": block,
+                "quote": quote,
+                "start": 0,
+                "end": 0,
+                "note": "",
+                "author": author,
+                "strokes": strokes,
+                "created": _now(),
+                "resolved": False,
+            }
+            self._write_annotations(name, [*annotations, created])
+            return created
 
     def _rewrite_ink(
         self, name: str, annotations: list[dict], existing: dict, strokes: list[dict]
@@ -240,13 +242,14 @@ class Store:
         return {"id": existing["id"], "removed": True}
 
     def set_resolved(self, name: str, annotation_id: str, resolved: bool) -> dict:
-        annotations = self.annotations(name)
-        for annotation in annotations:
-            if annotation["id"] == annotation_id:
-                annotation["resolved"] = resolved
-                self._write_annotations(name, annotations)
-                return annotation
-        raise DocNotFound(f"annotation {annotation_id}")
+        with self._lock:
+            annotations = self.annotations(name)
+            for annotation in annotations:
+                if annotation["id"] == annotation_id:
+                    annotation["resolved"] = resolved
+                    self._write_annotations(name, annotations)
+                    return annotation
+            raise DocNotFound(f"annotation {annotation_id}")
 
     def remove_annotation(self, name: str, annotation_id: str) -> dict:
         """Drop an annotation for good.
@@ -255,12 +258,13 @@ class Store:
         paragraph an edit took away, where there is nothing left to resolve
         against and the card would sit in the lost-and-found for ever.
         """
-        annotations = self.annotations(name)
-        remaining = [item for item in annotations if item["id"] != annotation_id]
-        if len(remaining) == len(annotations):
-            raise DocNotFound(f"annotation {annotation_id}")
-        self._write_annotations(name, remaining)
-        return {"id": annotation_id, "removed": True}
+        with self._lock:
+            annotations = self.annotations(name)
+            remaining = [item for item in annotations if item["id"] != annotation_id]
+            if len(remaining) == len(annotations):
+                raise DocNotFound(f"annotation {annotation_id}")
+            self._write_annotations(name, remaining)
+            return {"id": annotation_id, "removed": True}
 
     def inbox(self) -> str:
         if not self.inbox_path.is_file():
@@ -271,8 +275,9 @@ class Store:
         """Leave a marker. It cannot wake the agent; it waits for the next turn."""
         stamp = datetime.now().astimezone().isoformat(timespec="seconds")
         entry = f"- {stamp} — {text.strip() or 'read the board'}\n"
-        existing = self.inbox()
-        self._atomic_write(self.inbox_path, existing + entry)
+        with self._lock:
+            existing = self.inbox()
+            self._atomic_write(self.inbox_path, existing + entry)
 
     def _doc_path(self, name: str) -> Path:
         if not NAME_PATTERN.match(name) or name.endswith(".md"):

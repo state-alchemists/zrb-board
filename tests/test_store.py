@@ -169,3 +169,45 @@ def _note(quote: str) -> dict:
         "note": "a note",
         "author": "go",
     }
+
+
+def test_should_keep_ink_and_a_note_from_overwriting_each_other(store):
+    # Both are read-modify-write on one annotation list. While a note is being placed --
+    # the transaction held -- the browser's ink must wait its turn, or the later write
+    # would carry the list it read before the note existed and drop the note.
+    import threading
+
+    doc = store.create("0001-question", "# Q\n\ntext\n")
+    placed = []
+
+    def note():
+        store.add_annotation(
+            "0001-question",
+            {"block": "b_1", "quote": "text", "start": 0, "end": 0, "note": "x", "author": "tara"},
+            expected_rev=doc.rev,
+        )
+
+    def ink():
+        store.set_ink("0001-question", "b_1", "text", [{"points": [[1, 2]]}], author="go")
+        placed.append("ink")
+
+    with store.transaction():
+        note()
+        drawing = threading.Thread(target=ink)
+        drawing.start()
+        drawing.join(timeout=0.2)
+        assert placed == []
+    drawing.join(timeout=2)
+    assert placed == ["ink"]
+    kinds = sorted(one["kind"] for one in store.annotations("0001-question"))
+    assert kinds == ["ink", "note"]
+
+
+def test_should_take_a_transaction_inside_a_transaction(store):
+    # The lock is re-entrant on purpose: a caller holds the board still and the store's
+    # own methods take it again. Otherwise this call would deadlock.
+    doc = store.create("0001-question", "# Q\n\ntext\n")
+    with store.transaction():
+        store.set_ink("0001-question", "b_1", "text", [{"points": [[1, 2]]}], author="go")
+        store.write("0001-question", "# Q\n\nchanged\n", doc.rev)
+    assert [one["kind"] for one in store.annotations("0001-question")] == ["ink"]
