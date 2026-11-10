@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+import time
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as package_version
 from pathlib import Path
@@ -13,7 +14,7 @@ from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from board import anchors, config, digest, quoting, render
+from board import anchors, config, daemon, digest, quoting, render
 from board.render import Block
 from board.store import Doc, DocNotFound, INK_AUTHOR, RevConflict, Store
 
@@ -259,9 +260,43 @@ USAGE = """\
 zrb-board — the board's server, and the agent's side of it
 
     zrb-board              serve on board.config's host and port
+    zrb-board -d           serve in the background, with a pid file and a log
+    zrb-board stop         stop the background server
+    zrb-board status       whether it is running, and whether it answers
     zrb-board init-path    print board/zrb_init.py, for ZRB_INIT_SCRIPTS
     zrb-board --version    print the installed version
 """
+
+
+def _board_url() -> str:
+    return f"http://{config.host()}:{config.port()}/api/docs"
+
+
+def background() -> None:
+    """Start a detached copy of this program and return; the copy is what serves.
+
+    The pid is written before the wait, so `stop` finds it even if the copy dies on the way
+    up. The wait is only so that the command can say whether the board actually answered
+    rather than leaving you to guess.
+    """
+    url = _board_url()
+    if daemon.answering(url):
+        print(f"Already serving at {url}: nothing started.")
+        return
+    home = config.home()
+    home.mkdir(parents=True, exist_ok=True)
+    log = daemon.log_path(home)
+    pid = daemon.detach([sys.executable, "-m", "board.app"], log)
+    daemon.pid_path(home).write_text(str(pid), encoding="utf-8")
+    for _ in range(50):
+        if daemon.answering(url):
+            print(f"Serving in the background as pid {pid}: {url}")
+            print(f"Log: {log}")
+            return
+        if not daemon.running(pid):
+            break
+        time.sleep(0.1)
+    print(f"Started pid {pid}, but nothing answers at {url} yet. Log: {log}")
 
 
 def main() -> None:
@@ -276,6 +311,15 @@ def main() -> None:
         return
     if args in (["-h"], ["--help"]):
         print(USAGE)
+        return
+    if args in (["-d"], ["--background"]):
+        background()
+        return
+    if args == ["stop"]:
+        print(daemon.stop(daemon.pid_path(config.home())))
+        return
+    if args == ["status"]:
+        print(daemon.describe(daemon.pid_path(config.home()), _board_url()))
         return
     # An argument this program does not know used to start a server anyway: `--version`
     # served the board and said nothing about the version. Say so and start nothing.
