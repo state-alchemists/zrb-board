@@ -22,11 +22,23 @@ _UNWRAP = (
     (re.compile(r"^\s{0,3}(?:#{1,6}|[-*+]|\d+[.)]|>)\s+", re.M), ""),
 )
 _SPACE = re.compile(r"\s+")
+# A table row, and the rule under the header. `plain_text` renders a row as its cells with
+# the tags between them gone, so the source's pipes are not words on the page: a quote
+# copied from `| foo | bar |` has to become `foo bar`, and the separator row disappears.
+_TABLE_EDGE = re.compile(r"^\s*\|.*\|\s*$")
+_TABLE_SEPARATOR = re.compile(r"^\|?(?:\s*:?-{3,}:?\s*\|)+\s*(?::?-{3,}:?)?\|?$")
+
+
+def _table(line: str) -> str:
+    """*line* read as a table row: cells separated by spaces, no pipe left to match."""
+    if not _TABLE_EDGE.match(line):
+        return line
+    return "" if _TABLE_SEPARATOR.match(line.strip()) else line.replace("|", " ")
 
 
 def visible(text: str) -> str:
     """*text* as the page shows it: no markdown, one space between the words."""
-    stripped = text
+    stripped = "\n".join(_table(line) for line in text.splitlines())
     for pattern, replacement in _UNWRAP:
         stripped = pattern.sub(replacement, stripped)
     return _SPACE.sub(" ", stripped).strip()

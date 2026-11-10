@@ -41,6 +41,19 @@ def test_visible_drops_an_image_the_page_never_shows():
     ) == ({"id": "a", "text": "Before after"}, "Before after")
 
 
+def test_visible_reads_a_table_row_as_the_page_lays_it_out():
+    # plain_text renders a row as its cells -- `| foo | bar |` is "foo bar" on the page --
+    # and the rule under the header is nowhere at all.
+    assert tools._visible("| Name | Value |") == "Name Value"
+    assert tools._visible("| --- | --- |") == ""
+    assert tools._visible("| foo | bar |") == "foo bar"
+    # A pipe that is punctuation, not a cell border, stays where it is.
+    assert tools._visible("either | or") == "either | or"
+    assert tools._block_holding(
+        [{"id": "t", "text": "Name Value foo bar"}], "| foo | bar |"
+    ) == ({"id": "t", "text": "Name Value foo bar"}, "foo bar")
+
+
 def test_held_cuts_from_the_block_so_the_server_can_anchor_it():
     block = "Go: a sentence spanning two lines"
     quote = "**Go:** a sentence\nspanning two lines"

@@ -79,3 +79,13 @@ def test_should_place_a_note_whose_line_carries_an_image(store):
     doc = store.create("0001-question", "# Q\n\nBefore ![d](d.png) after\n")
     text = digest.build_digest(doc, [_note("Before after")])
     assert "## unplaced" not in text
+
+
+def test_should_place_a_note_on_a_table_row(store):
+    # A row is its cells on the page; the source's pipes are not words, and the rule under
+    # the header is not a line a note can be about.
+    doc = store.create(
+        "0001-question", "# Q\n\n| Name | Value |\n| --- | --- |\n| foo | bar |\n"
+    )
+    text = digest.build_digest(doc, [_note("| foo | bar |")])
+    assert "## unplaced" not in text
