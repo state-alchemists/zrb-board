@@ -60,11 +60,29 @@ def test_block_holding_prefers_the_block_with_most_of_the_quote():
     ]
     # "two three four" is in `long` and `part`; the tighter of those wins.
     assert tools._block_holding(blocks, "two three four") == (blocks[2], "two three four")
-    # A quote the block only partly holds anchors on the part it does.
-    assert tools._block_holding(blocks, "two three four five six seven") == (
-        blocks[0],
-        "two three four five six",
+
+
+def test_block_holding_refuses_a_quote_no_block_holds_whole():
+    # Not shortened to "two three four": a quote from a read the document has moved past
+    # would otherwise land on whichever paragraph opens with the same words. The error
+    # offers the block holding the most of it, so the caller can quote that instead.
+    blocks = [
+        {"id": "long", "text": "one two three four five six"},
+        {"id": "short", "text": "two"},
+    ]
+    with pytest.raises(RuntimeError, match="two three four five six"):
+        tools._block_holding(blocks, "two three four five six seven")
+
+
+def test_the_read_view_is_told_apart_from_the_document():
+    view = (
+        "rev 8173f5fe4d34 · updated 2026-11-10T07:26 · 1 annotation(s)\n"
+        "source: docs/0001-question.md\n\n# Q\n\ntext\n"
     )
+    assert tools._is_the_read_view(view)
+    assert not tools._is_the_read_view("# Q\n\ntext\n")
+    # Either line on its own is a document's own words, not the view's header.
+    assert not tools._is_the_read_view("source: docs/0001-question.md\n")
 
 
 def test_block_holding_refuses_a_quote_with_no_words():

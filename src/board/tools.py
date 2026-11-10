@@ -14,6 +14,7 @@ signs a note, `agent` unless it is set.
 
 import json
 import os
+import re
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -75,6 +76,22 @@ def _document_path(name: str, suffix: str = "") -> str:
     return f"/api/docs/{urllib.parse.quote(name)}{suffix}"
 
 
+# The two lines that only a digest carries (`digest.build_digest`): a revision line and
+# the file it came from. A document could hold either on its own; both together, right
+# above the body, are the read's view of the file and nothing else.
+_DIGEST_REV = re.compile(r"(?m)^rev \w+ · updated \S+ · \d+ annotation\(s\)$")
+_DIGEST_SOURCE = re.compile(r"(?m)^source: docs/\S+\.md$")
+
+
+def _is_the_read_view(markdown: str) -> bool:
+    """Whether *markdown* is what BoardRead printed, rather than the document itself.
+
+    Writing the view back would make its title, revision, source line and note markers
+    part of the document for good. BoardRead(source=True) is the text BoardWrite takes.
+    """
+    return bool(_DIGEST_REV.search(markdown) and _DIGEST_SOURCE.search(markdown))
+
+
 def _held(block_text: str, needle: str) -> str | None:
     """The longest run of *needle*'s leading words that *block_text* holds verbatim.
 
@@ -93,7 +110,14 @@ def _held(block_text: str, needle: str) -> str | None:
 
 
 def _block_holding(blocks: list[dict], quote: str) -> tuple[dict, str]:
-    """The tightest block holding *quote*, and the quote as that block holds it."""
+    """The tightest block that holds the whole quote, and the quote as that block holds it.
+
+    The whole of it, not a prefix: a quote taken from a read the document has since moved
+    past would otherwise be pinned to whichever paragraph opens with the same words, and
+    the note would read as if it were about a sentence nobody wrote. When no block holds
+    it, the error names the block holding the most of it, so the caller can quote that
+    passage exactly and say it again.
+    """
     needle = _visible(quote)
     if not needle:
         raise RuntimeError(
@@ -101,7 +125,7 @@ def _block_holding(blocks: list[dict], quote: str) -> tuple[dict, str]:
             "from BoardRead."
         )
     holding = [
-        (len(held), block, held)
+        (block, held)
         for block in blocks
         if (held := _held(block["text"], needle)) is not None
     ]
@@ -111,13 +135,20 @@ def _block_holding(blocks: list[dict], quote: str) -> tuple[dict, str]:
             f"[SYSTEM SUGGESTION] no block holds {needle!r}. Quote words that are "
             f"on the page; the document begins: {excerpts}"
         )
-    # Most of the quote wins; among equals, the tightest block, as the board chooses.
-    most = max(size for size, _, _ in holding)
-    block, held = min(
-        ((block, held) for size, block, held in holding if size == most),
-        key=lambda pair: len(pair[0]["text"]),
-    )
-    return block, held
+    whole = [(block, held) for block, held in holding if held == needle]
+    if not whole:
+        # The block holding most of the quote, and the tightest of those on a tie: it
+        # holds the passage the caller meant, so it is the one to quote back.
+        block, partial = max(
+            holding, key=lambda pair: (len(pair[1]), -len(pair[0]["text"]))
+        )
+        raise RuntimeError(
+            f"[SYSTEM SUGGESTION] no block holds the whole quote, so nothing is noted. "
+            f"Block {block['id']} holds {partial!r}: quote exactly that if it is the "
+            "passage you mean. A quote that runs over two paragraphs has to be cut at "
+            "the boundary -- the board anchors inside one block."
+        )
+    return min(whole, key=lambda pair: len(pair[0]["text"]))
 
 
 def _is_note(annotation: dict) -> bool:
@@ -186,16 +217,28 @@ def BoardState() -> str:
     return "\n".join(lines)
 
 
-def BoardRead(name: str) -> str:
-    """Read one document as text: its revision first, then the markdown with notes inline.
+def BoardRead(name: str, source: bool = False) -> str:
+    """Read one document: the readable view, or the document's own markdown.
 
-    Notes appear as `⟦id · author · block …⟧` markers beside the passage they are about,
-    so a note's id is read here and closed with BoardResolveNote.
+    By default it is the view: the title, the revision, and each note in the margin
+    beside the passage it is about, as `⟦id · author · block …⟧`. Read and quote from it.
+    It is *not* what BoardWrite takes -- its header and markers are the view's, not the
+    document's words.
 
     Args:
       name: A document name, as BoardState prints it.
+      source: True gives the document's own markdown in a fence, with the revision above
+        it: that is the text BoardWrite takes back after an edit. Use it to write, and
+        the view to think.
     """
-    return _request("GET", _document_path(name, "/state.md"))[1]
+    if not source:
+        return _request("GET", _document_path(name, "/state.md"))[1]
+    document = _json("GET", _document_path(name))
+    fence = "````"
+    return (
+        f"rev {document['rev']}\n\n{fence}markdown\n"
+        f"{document['markdown'].rstrip()}\n{fence}\n"
+    )
 
 
 def BoardWrite(name: str, markdown: str, rev: str) -> str:
@@ -210,6 +253,13 @@ def BoardWrite(name: str, markdown: str, rev: str) -> str:
       markdown: The complete new text of the document.
       rev: The revision BoardRead printed, e.g. `f5d1e63f1a70`.
     """
+    if _is_the_read_view(markdown):
+        raise RuntimeError(
+            "[SYSTEM SUGGESTION] nothing written: that is BoardRead's view of the "
+            f"document, not the document -- its title line, its rev line, its source "
+            f"line and its note markers would become words on the page. Take the text "
+            f"from BoardRead({name!r}, source=True) and edit that."
+        )
     if not markdown.strip():
         raise RuntimeError(
             "[SYSTEM SUGGESTION] nothing written: an empty document would replace all "
@@ -237,7 +287,8 @@ def BoardNote(name: str, quote: str, note: str) -> str:
       name: A document name, as BoardState prints it.
       quote: The words the note is about, copied from BoardRead's text -- markdown and
         all: it is matched against the block's visible words, so bold, a link, a heading's
-        hashes or a line break in the middle do not stop it.
+        hashes or a line break in the middle do not stop it. It has to be words one block
+        holds whole; a quote that runs over two paragraphs is refused, not shortened.
       note: What to say about them.
     """
     document = _json("GET", _document_path(name))
@@ -247,10 +298,7 @@ def BoardNote(name: str, quote: str, note: str) -> str:
         _document_path(name, "/annotations"),
         {"block": block["id"], "quote": held, "note": note, "author": NOTE_AUTHOR},
     )
-    # Said only when the block held less than was quoted: the note is on the right
-    # paragraph, and the words it could not carry are the reader's to look at.
-    short = "" if held == _visible(quote) else f" (anchored on {held!r})"
-    return f"Noted on block {block['id']}{short}: {note}"
+    return f"Noted on block {block['id']}: {note}"
 
 
 def BoardResolveNote(name: str, note_id: str) -> str:
