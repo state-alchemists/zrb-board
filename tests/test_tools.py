@@ -54,6 +54,27 @@ def test_visible_reads_a_table_row_as_the_page_lays_it_out():
     ) == ({"id": "t", "text": "Name Value foo bar"}, "foo bar")
 
 
+def test_visible_unescapes_the_entities_the_page_shows():
+    # plain_text unescapes after stripping tags, so a block holds `Fish & Chips` while the
+    # source says `Fish &amp; Chips`.
+    assert tools._visible("Fish &amp; Chips") == "Fish & Chips"
+    assert tools._block_holding(
+        [{"id": "a", "text": "Fish & Chips"}], "Fish &amp; Chips"
+    ) == ({"id": "a", "text": "Fish & Chips"}, "Fish & Chips")
+
+
+def test_the_default_address_follows_the_board_settings(monkeypatch):
+    # The tools call the port the server binds, not one of their own.
+    monkeypatch.setenv("ZRB_BOARD_HOST", "0.0.0.0")
+    monkeypatch.setenv("ZRB_BOARD_PORT", "9000")
+    assert tools._default_url() == "http://127.0.0.1:9000"
+    monkeypatch.setenv("ZRB_BOARD_HOST", "::1")
+    assert tools._default_url() == "http://[::1]:9000"
+    monkeypatch.delenv("ZRB_BOARD_HOST")
+    monkeypatch.delenv("ZRB_BOARD_PORT")
+    assert tools._default_url() == "http://127.0.0.1:8765"
+
+
 def test_held_cuts_from_the_block_so_the_server_can_anchor_it():
     block = "Go: a sentence spanning two lines"
     quote = "**Go:** a sentence\nspanning two lines"

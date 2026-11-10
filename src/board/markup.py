@@ -9,6 +9,7 @@ An image has no visible words: `plain_text` drops the `<img>` tag and the alt te
 text on the page, so an image is dropped here too rather than turned into its alt.
 """
 
+import html
 import re
 
 _UNWRAP = (
@@ -37,8 +38,10 @@ def _table(line: str) -> str:
 
 
 def visible(text: str) -> str:
-    """*text* as the page shows it: no markdown, one space between the words."""
+    """*text* as the page shows it: no markdown, no entities, one space between words."""
     stripped = "\n".join(_table(line) for line in text.splitlines())
     for pattern, replacement in _UNWRAP:
         stripped = pattern.sub(replacement, stripped)
-    return _SPACE.sub(" ", stripped).strip()
+    # `plain_text` unescapes after it strips tags, so `&amp;` in the source reaches a block
+    # as `&`; without this a note quoting "Fish &amp; Chips" matches no block at all.
+    return _SPACE.sub(" ", html.unescape(stripped)).strip()

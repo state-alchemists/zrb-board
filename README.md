@@ -137,9 +137,10 @@ They are registered with zrb by `src/board/zrb_init.py`, which a shell points at
 export ZRB_INIT_SCRIPTS="$ZRB_INIT_SCRIPTS:$(zrb-board init-path)"
 ```
 
-`BOARD_URL` overrides the address (the one `zrb-board` binds by default); `BOARD_AUTHOR`
-signs a note, `agent` unless it is set. The tools read the marker folder as a whole and
-fold it by document, because nothing ever clears it.
+`BOARD_URL` overrides the address; without it the tools call the host and port the server
+binds (`ZRB_BOARD_HOST`, `ZRB_BOARD_PORT`). `BOARD_AUTHOR` signs a note, `agent` unless it
+is set. The tools read the marker folder as a whole and fold it by document, because
+nothing ever clears it.
 
 ## The button is a note, not a bell
 
