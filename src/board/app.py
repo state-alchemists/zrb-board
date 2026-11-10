@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as package_version
 from pathlib import Path
@@ -12,7 +13,7 @@ from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from board import anchors, config, digest, render
+from board import anchors, config, digest, quoting, render
 from board.render import Block
 from board.store import Doc, DocNotFound, INK_AUTHOR, RevConflict, Store
 
@@ -50,6 +51,12 @@ class AnnotationBody(BaseModel):
 
 class InboxBody(BaseModel):
     text: str = ""
+
+
+class NoteBody(BaseModel):
+    quote: str = ""
+    note: str = ""
+    author: str = "agent"
 
 
 class InkBody(BaseModel):
@@ -195,6 +202,49 @@ def _register_routes(app: FastAPI, store: Store) -> None:
             raise _not_found(name) from None
         return digest.build_digest(doc, store.annotations(name))
 
+    @app.post("/api/docs/{name}/notes", status_code=201)
+    def add_note(name: str, body: NoteBody) -> dict:
+        """A note from a quote: located and stored with nothing allowed in between.
+
+        The quote may arrive with its markdown -- it is read from the source by an agent,
+        or seen on the page -- and it is located against the document as this request reads
+        it. The whole thing is one transaction: the render that finds the block is not a
+        write, so without the store held still, an edit could land between finding the
+        passage and storing the note, and the note would name a block the page no longer
+        has.
+        """
+        with store.transaction():
+            try:
+                doc = store.read(name)
+            except DocNotFound:
+                raise _not_found(name) from None
+            found = quoting.locate(doc.markdown, body.quote)
+            if isinstance(found, str):
+                # 422: the quote was read fine, it is the passage that cannot be anchored.
+                raise HTTPException(status_code=422, detail=found)
+            block, words = found
+            try:
+                return store.add_annotation(
+                    name,
+                    {
+                        "block": block,
+                        "quote": words,
+                        "note": body.note,
+                        "author": body.author,
+                        "start": 0,
+                        "end": 0,
+                    },
+                    expected_rev=doc.rev,
+                )
+            except RevConflict as conflict:
+                # Written from outside this process -- an editor saving the file. The
+                # quote is worth another read, so the caller may simply ask again.
+                raise HTTPException(
+                    status_code=409,
+                    detail="the document changed while the note was being placed; "
+                    "read it again and retry",
+                ) from conflict
+
     @app.get("/api/inbox", response_class=PlainTextResponse)
     def read_inbox() -> str:
         return store.inbox()
@@ -206,6 +256,11 @@ def _register_routes(app: FastAPI, store: Store) -> None:
 
 
 def main() -> None:
+    # `zrb-board init-path` is how a shell points ZRB_INIT_SCRIPTS at the agent's side of
+    # the board (board/zrb_init.py); it prints a path and starts nothing.
+    if sys.argv[1:] == ["init-path"]:
+        print(Path(__file__).with_name("zrb_init.py"))
+        return
     uvicorn.run(create_app(), host=config.host(), port=config.port())
 
 

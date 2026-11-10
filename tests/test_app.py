@@ -113,3 +113,57 @@ def test_should_remove_an_annotation_whose_anchor_an_edit_took_away(client, stor
 def test_should_answer_404_when_removing_an_annotation_that_is_not_there(client, store):
     store.create("0001-question", "# Q\n\ntext\n")
     assert client.delete("/api/docs/0001-question/annotations/a9").status_code == 404
+
+
+def test_should_say_where_a_quote_lands_and_store_it_in_one_request(client, store):
+    # One request, because two would leave a window in which an edit moves the passage the
+    # quote was found on; the quote may carry its markdown, and the board renders it.
+    store.create(
+        "0001-question",
+        "# Q\n\n| Name | Value |\n| --- | --- |\n| foo | bar |\n\nSee [zrb](https://x.y).\n",
+    )
+
+    def noted(quote):
+        return client.post(
+            "/api/docs/0001-question/notes",
+            json={"quote": quote, "note": "here", "author": "tara"},
+        )
+
+    row = noted("| foo | bar |")
+    assert row.status_code == 201
+    assert row.json()["quote"] == "foo bar"
+    assert noted("See [zrb](https://x.y).").json()["quote"] == "See zrb ."
+    assert noted("foo bar").json()["block"]
+    stored = client.get("/api/docs/0001-question").json()["annotations"]
+    assert len(stored) == 3 and all(not one["orphaned"] for one in stored)
+    # Nothing holds it: 422 and a sentence saying so.
+    missed = noted("not there")
+    assert missed.status_code == 422 and "No block holds" in missed.json()["detail"]
+    assert client.post("/api/docs/nope/notes", json={"quote": "x"}).status_code == 404
+
+
+def test_should_refuse_a_note_whose_document_moved_while_it_was_placed(
+    client, store, monkeypatch
+):
+    # Finding the block is a render, not a write, so a save can land between the read and
+    # the store. The note states the revision it was placed against; when the file is not
+    # that revision any more -- an editor saving it, outside this process -- the note is
+    # refused and the caller may look again, rather than being stored against a block the
+    # page no longer has.
+    from board import app as app_module
+
+    doc = store.create("0001-question", "# Q\n\nalpha\n")
+    real_locate = app_module.quoting.locate
+
+    def locating_through_an_edit(markdown, quote):
+        found = real_locate(markdown, quote)
+        store.write("0001-question", "# Q\n\nbeta\n", doc.rev)
+        return found
+
+    monkeypatch.setattr(app_module.quoting, "locate", locating_through_an_edit)
+    refused = client.post(
+        "/api/docs/0001-question/notes", json={"quote": "alpha", "note": "x"}
+    )
+    assert refused.status_code == 409
+    assert "changed" in refused.json()["detail"]
+    assert store.annotations("0001-question") == []

@@ -1,26 +1,27 @@
 """A text view of a document with its annotations inline — what the agent reads.
 
-The browser can place a margin note against a paragraph. Text cannot, so the
-digest puts each note on the line where its quote ends, and lists anything it
-could not place under its own heading rather than guessing.
+The browser can place a margin note against a paragraph. Text cannot, so the digest puts
+each note on the line where the block it belongs to starts, and lists anything it could
+not place under its own heading rather than guessing.
+
+Which block a note belongs to is `anchors.resolve`'s answer, the same one the page uses,
+so the text and the browser never disagree about where a note sits. The block's source
+line comes from the renderer (`render.Block.line`), which is why the document is rendered
+here: words the page shows and a line the file holds have to come from one parse.
 """
 
 from __future__ import annotations
 
-import re
-
+from board import anchors, render
 from board.store import Doc
 
-_SPACE = re.compile(r"\s+")
-# Inline markup: the quote comes from the rendered page, the line from the file.
-_INLINE = re.compile(r"[`*_~]")
-QUOTE_PREFIX = 24
 RESOLVED_MARK = " · resolved"
 
 
 def build_digest(doc: Doc, annotations: list[dict]) -> str:
+    blocks = render.render(doc.markdown).blocks
     lines = doc.markdown.splitlines()
-    placed, unplaced = _place(annotations, lines)
+    placed, unplaced = _place(annotations, blocks)
     header = [
         f"# {doc.title}",
         f"rev {doc.rev} · updated {doc.updated.isoformat(timespec='minutes')}"
@@ -57,30 +58,17 @@ def _interleave(lines: list[str], placed: dict[int, list[str]]) -> list[str]:
 
 
 def _place(
-    annotations: list[dict], lines: list[str]
+    annotations: list[dict], blocks: list[render.Block]
 ) -> tuple[dict[int, list[str]], list[str]]:
+    """Where each note goes: the line its block starts on, or the lost-and-found."""
+    line_of = {block.id: block.line for block in blocks}
     placed: dict[int, list[str]] = {}
     unplaced: list[str] = []
     for annotation in annotations:
-        index = _line_index(annotation.get("quote", ""), lines)
+        match = anchors.resolve(annotation, blocks)
+        index = line_of.get(match[0]) if match else None
         if index is None:
             unplaced.append(format_note(annotation))
             continue
         placed.setdefault(index, []).append(format_note(annotation))
     return placed, unplaced
-
-
-def _line_index(quote: str, lines: list[str]) -> int | None:
-    """The line holding the start of the quote, ignoring markdown syntax.
-
-    A quote arrives from rendered text, so it has no markup in it while the
-    source line may carry plenty — `**Go:** a sentence` must still match the
-    quote `Go: a sentence`.
-    """
-    needle = _INLINE.sub("", _SPACE.sub(" ", quote)).strip()[:QUOTE_PREFIX]
-    if not needle:
-        return None
-    for index, line in enumerate(lines):
-        if needle in _INLINE.sub("", _SPACE.sub(" ", line)):
-            return index
-    return None

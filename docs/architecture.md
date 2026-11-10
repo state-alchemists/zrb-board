@@ -181,6 +181,7 @@ chat — where the work actually happens — has no address to push to.
 | `GET /api/docs/{name}` | markdown, rendered html, blocks, annotations with `resolved_block` and `orphaned` |
 | `GET /api/docs/{name}/state.md` | the text digest |
 | `PUT /api/docs/{name}` | `{markdown, rev}` → `{rev}` or `409 {rev, markdown}` |
+| `POST /api/docs/{name}/notes` | `{quote, note, author}` → the stored annotation, the quote rendered where it stands, or `422` saying why no block holds it |
 | `POST /api/docs/{name}/annotations` | `{block, quote, note, author, start, end}` |
 | `POST /api/docs/{name}/annotations/{id}/resolve` | close a note |
 | `DELETE /api/docs/{name}/annotations/{id}` | drop an annotation for good — what an orphan offers |

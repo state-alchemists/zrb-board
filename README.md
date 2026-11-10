@@ -112,10 +112,36 @@ shape itself is the argument.
 | `GET /api/docs/{name}` | html, blocks, and annotations resolved to blocks |
 | `GET /api/docs/{name}/state.md` | **the text view the agent reads** |
 | `PUT /api/docs/{name}` | `{markdown, rev}` — 409 with the current text on a stale rev |
+| `POST /api/docs/{name}/notes` | `{quote, note, author}` — locate the quote and store the note in one request |
 | `POST /api/docs/{name}/annotations` | `{block, quote, note, author, start, end}` |
 | `POST /api/docs/{name}/annotations/{id}/resolve` | close a note |
 | `PUT /api/docs/{name}/ink/{block}` | `{quote, strokes}` — replace the strokes drawn on one block |
 | `GET`/`POST /api/inbox` | the "Mark for next message" marker |
+
+## The agent's tools
+
+`src/board/tools.py` is the other side of that table: five tools an LLM agent calls, in
+the same tree as the routes they call, so a route that changes here changes its caller in
+the same diff. Nothing in the server imports them — `board.app` runs without zrb.
+
+| Tool | What it does |
+|---|---|
+| `BoardState` | the marks waiting, then every document with its revision and its open notes (ink and notes counted apart) |
+| `BoardRead` | one document as text: the view — `rev`, then each note beside the passage it is about — or, with `source=True`, the document's own markdown byte for byte, which is the text `BoardWrite` takes |
+| `BoardWrite` | the whole markdown back, stating the revision that was read; a stale revision writes nothing and returns the current text to merge into |
+| `BoardNote` | a note on a quoted passage — the quote is sent to the board, which renders it where it stands (a table row under its header, a link as its words) and returns the block and the words that block holds |
+| `BoardResolveNote` | close a note by the id `BoardRead` shows; ink is refused, because there is nothing to close |
+
+They are registered with zrb by `src/board/zrb_init.py`, which a shell points at:
+
+```sh
+export ZRB_INIT_SCRIPTS="$ZRB_INIT_SCRIPTS:$(zrb-board init-path)"
+```
+
+`BOARD_URL` overrides the address; without it the tools call the host and port the server
+binds (`ZRB_BOARD_HOST`, `ZRB_BOARD_PORT`). `BOARD_AUTHOR` signs a note, `agent` unless it
+is set. The tools read the marker folder as a whole and fold it by document, because
+nothing ever clears it.
 
 ## The button is a note, not a bell
 
