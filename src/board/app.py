@@ -255,12 +255,34 @@ def _register_routes(app: FastAPI, store: Store) -> None:
         return {"ok": True}
 
 
+USAGE = """\
+zrb-board — the board's server, and the agent's side of it
+
+    zrb-board              serve on board.config's host and port
+    zrb-board init-path    print board/zrb_init.py, for ZRB_INIT_SCRIPTS
+    zrb-board --version    print the installed version
+"""
+
+
 def main() -> None:
+    args = sys.argv[1:]
     # `zrb-board init-path` is how a shell points ZRB_INIT_SCRIPTS at the agent's side of
     # the board (board/zrb_init.py); it prints a path and starts nothing.
-    if sys.argv[1:] == ["init-path"]:
+    if args == ["init-path"]:
         print(Path(__file__).with_name("zrb_init.py"))
         return
+    if args in (["-V"], ["--version"]):
+        print(installed_version())
+        return
+    if args in (["-h"], ["--help"]):
+        print(USAGE)
+        return
+    # An argument this program does not know used to start a server anyway: `--version`
+    # served the board and said nothing about the version. Say so and start nothing.
+    if args:
+        print(f"zrb-board: unknown argument {args[0]!r}", file=sys.stderr)
+        print("Run `zrb-board --help` for what it takes.", file=sys.stderr)
+        raise SystemExit(2)
     uvicorn.run(create_app(), host=config.host(), port=config.port())
 
 
