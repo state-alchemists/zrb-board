@@ -14,7 +14,6 @@ signs a note, `agent` unless it is set.
 
 import json
 import os
-import re
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -110,26 +109,20 @@ def _document_path(name: str, suffix: str = "") -> str:
     return f"/api/docs/{urllib.parse.quote(name)}{suffix}"
 
 
-# The view `digest.build_digest` writes opens with three lines nothing else does: a title,
-# a revision line, and the file it came from. Only the start is read -- a document may
-# quote a digest of its own further down, and that is the document's business.
-_DIGEST_REV = re.compile(r"^rev \w+ · updated \S+ · \d+ annotation\(s\)$")
-_DIGEST_SOURCE = re.compile(r"^source: docs/\S+\.md$")
+def _is_the_read_view(markdown: str, name: str, rev: str) -> bool:
+    """Whether *markdown* is the view BoardRead printed for **this** document.
 
-
-def _is_the_read_view(markdown: str) -> bool:
-    """Whether *markdown* is what BoardRead printed, rather than a document.
-
-    Writing the view back would make its title, revision line, source line and note
-    markers part of the document for good. BoardRead(source=True) is the text BoardWrite
-    takes; this only catches a caller who pasted the default read by mistake.
+    The view opens with three lines nothing else does -- a title, a `rev … · updated …`
+    line, and the file it came from -- and it names *this* document at *this* revision.
+    Checking the revision as well is what keeps a page that merely quotes a digest of its
+    own (a sample, a screenshot of one) from being mistaken for the view and refused.
     """
     lines = markdown.splitlines()[:3]
     return (
         len(lines) == 3
         and lines[0].startswith("# ")
-        and bool(_DIGEST_REV.match(lines[1]))
-        and bool(_DIGEST_SOURCE.match(lines[2]))
+        and lines[1].startswith(f"rev {rev} · updated ")
+        and lines[2] == f"source: docs/{name}.md"
     )
 
 
@@ -248,7 +241,7 @@ def BoardWrite(name: str, markdown: str, rev: str) -> str:
       markdown: The complete new text of the document.
       rev: The revision BoardRead printed, e.g. `f5d1e63f1a70`.
     """
-    if _is_the_read_view(markdown):
+    if _is_the_read_view(markdown, name, rev):
         raise RuntimeError(
             "[SYSTEM SUGGESTION] nothing written: that is BoardRead's view of the "
             f"document, not the document -- its title line, its rev line, its source "

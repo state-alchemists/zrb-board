@@ -41,11 +41,12 @@ def test_the_read_view_is_told_apart_from_the_document():
         "rev 8173f5fe4d34 · updated 2026-11-10T07:26 · 1 annotation(s)\n"
         "source: docs/0001-question.md\n\n# Q\n\ntext\n"
     )
-    assert tools._is_the_read_view(view)
-    assert not tools._is_the_read_view("# Q\n\ntext\n")
-    # A document may quote a digest of its own further down, and that is its business:
-    # only the start of the text is read.
-    assert not tools._is_the_read_view("# Example\n\nA view looks like this:\n\n" + view)
+    assert tools._is_the_read_view(view, "0001-question", "8173f5fe4d34")
+    assert not tools._is_the_read_view("# Q\n\ntext\n", "0001-question", "8173f5fe4d34")
+    # A page that quotes a digest of its own is a page: the revision it names is not this
+    # document's, so the guard does not fire on it.
+    assert not tools._is_the_read_view(view, "0001-question", "0000000000ff")
+    assert not tools._is_the_read_view(view, "another-document", "8173f5fe4d34")
 
 
 def test_the_source_view_is_the_document_itself(monkeypatch):
