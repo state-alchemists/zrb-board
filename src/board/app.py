@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as package_version
 from pathlib import Path
@@ -206,6 +207,11 @@ def _register_routes(app: FastAPI, store: Store) -> None:
 
 
 def main() -> None:
+    # `zrb-board init-path` is how a shell points ZRB_INIT_SCRIPTS at the agent's side of
+    # the board (board/zrb_init.py); it prints a path and starts nothing.
+    if sys.argv[1:] == ["init-path"]:
+        print(Path(__file__).with_name("zrb_init.py"))
+        return
     uvicorn.run(create_app(), host=config.host(), port=config.port())
 
 
