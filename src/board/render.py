@@ -26,6 +26,10 @@ class Block:
     id: str
     text: str
     html: str
+    # The 0-based source line the block starts on. The digest places a note beside the
+    # line its block starts on, so it needs the renderer's answer rather than a second
+    # reading of the markdown.
+    line: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,7 +79,10 @@ def render(markdown: str) -> Rendered:
     for group in _group_blocks(md.parse(markdown)):
         fragment = md.renderer.render(group, md.options, {})
         text = plain_text(fragment)
-        blocks.append(Block(_block_id(text, seen), text, fragment))
+        # The first token of a block carries where it starts in the source; an inline
+        # token does not, and never opens a block.
+        start = next((token.map[0] for token in group if token.map), 0)
+        blocks.append(Block(_block_id(text, seen), text, fragment, start))
     body = "\n".join(
         f'<section class="block" data-block="{block.id}">{block.html}</section>'
         for block in blocks

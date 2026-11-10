@@ -95,10 +95,13 @@ def test_should_place_a_note_on_a_quote_that_runs_over_a_hard_wrapped_line(store
 
 
 def test_should_place_a_note_on_a_table_row(store):
-    # A row is its cells on the page; the source's pipes are not words, and the rule under
-    # the header is not a line a note can be about.
+    # A row is its cells on the page; the source's pipes are not words. The tool sends the
+    # words the board renders, and the note lands beside the table's block -- which starts
+    # at the header row, because the whole table is one block.
     doc = store.create(
         "0001-question", "# Q\n\n| Name | Value |\n| --- | --- |\n| foo | bar |\n"
     )
-    text = digest.build_digest(doc, [_note("| foo | bar |")])
+    text = digest.build_digest(doc, [_note("foo bar")])
     assert "## unplaced" not in text
+    lines = text.splitlines()
+    assert lines[lines.index("| Name | Value |") + 2].startswith("⟦a1 · tara")

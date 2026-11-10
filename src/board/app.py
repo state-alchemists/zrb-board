@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from board import anchors, config, digest, render
+from board import anchors, config, digest, quoting, render
 from board.render import Block
 from board.store import Doc, DocNotFound, INK_AUTHOR, RevConflict, Store
 
@@ -51,6 +51,10 @@ class AnnotationBody(BaseModel):
 
 class InboxBody(BaseModel):
     text: str = ""
+
+
+class QuoteBody(BaseModel):
+    quote: str = ""
 
 
 class InkBody(BaseModel):
@@ -195,6 +199,26 @@ def _register_routes(app: FastAPI, store: Store) -> None:
         except DocNotFound:
             raise _not_found(name) from None
         return digest.build_digest(doc, store.annotations(name))
+
+    @app.post("/api/docs/{name}/quote")
+    def locate_quote(name: str, body: QuoteBody) -> dict:
+        """Where a quote lands on the page: the block that holds it, and its words.
+
+        The agent's tools send a quote here -- copied out of the source with its markdown,
+        or seen on the page -- and get back the block it belongs to and the words that
+        block holds, which is what an annotation anchors to. Rendering, and so every
+        difference between the file and the page, stays on this side.
+        """
+        try:
+            doc = store.read(name)
+        except DocNotFound:
+            raise _not_found(name) from None
+        found = quoting.locate(doc.markdown, body.quote)
+        if isinstance(found, str):
+            # 422: the quote was read fine, it is the passage that cannot be anchored.
+            raise HTTPException(status_code=422, detail=found)
+        block, words = found
+        return {"block": block, "quote": words}
 
     @app.get("/api/inbox", response_class=PlainTextResponse)
     def read_inbox() -> str:

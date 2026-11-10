@@ -21,7 +21,6 @@ import urllib.request
 from typing import Any
 
 from board import config
-from board.markup import visible as _visible
 
 
 def _default_url() -> str:
@@ -67,21 +66,30 @@ def _request(method: str, path: str, payload: dict | None = None) -> tuple[str, 
     try:
         with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT) as reply:
             return reply.headers.get_content_type(), reply.read().decode("utf-8")
-    except urllib.error.HTTPError as failure:
-        detail = failure.read().decode("utf-8", "replace")
-        if failure.code == 409:
+    except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError) as failure:
+        # A read timeout is not an HTTPError, and urllib does not always wrap it in a
+        # URLError: it reaches here bare. All of them mean the same thing to a caller.
+        if isinstance(failure, urllib.error.HTTPError):
+            detail = failure.read().decode("utf-8", "replace")
+            payload = None
             try:
-                raise BoardConflict(json.loads(detail)) from None
+                payload = json.loads(detail)
             except json.JSONDecodeError:
                 pass
+            if isinstance(payload, dict) and payload.get("rev") and payload.get("markdown"):
+                raise BoardConflict(payload) from None
+            # A refusal from the board is written for the caller; its `detail` is the
+            # sentence, and the JSON around it is noise.
+            if isinstance(payload, dict) and isinstance(payload.get("detail"), str):
+                detail = payload["detail"]
+            raise RuntimeError(
+                f"[SYSTEM SUGGESTION] the board answered {method} {path} with HTTP "
+                f"{failure.code}: {detail[:2000]}"
+            ) from None
+        reason = getattr(failure, "reason", failure)
         raise RuntimeError(
-            f"[SYSTEM SUGGESTION] the board answered {method} {path} with HTTP "
-            f"{failure.code}: {detail[:2000]}"
-        ) from None
-    except urllib.error.URLError as failure:
-        raise RuntimeError(
-            f"[SYSTEM SUGGESTION] the board is not answering at {BOARD_URL} "
-            f"({failure.reason}); it is started with `zrb-board`."
+            f"[SYSTEM SUGGESTION] the board is not answering at {BOARD_URL} within "
+            f"{REQUEST_TIMEOUT}s ({reason}); it is started with `zrb-board`."
         ) from None
 
 
@@ -131,48 +139,6 @@ def _held(block_text: str, needle: str) -> str | None:
         if candidate in block_text:
             return candidate
     return None
-
-
-def _block_holding(blocks: list[dict], quote: str) -> tuple[dict, str]:
-    """The tightest block that holds the whole quote, and the quote as that block holds it.
-
-    The whole of it, not a prefix: a quote taken from a read the document has since moved
-    past would otherwise be pinned to whichever paragraph opens with the same words, and
-    the note would read as if it were about a sentence nobody wrote. When no block holds
-    it, the error names the block holding the most of it, so the caller can quote that
-    passage exactly and say it again.
-    """
-    needle = _visible(quote)
-    if not needle:
-        raise RuntimeError(
-            "[SYSTEM SUGGESTION] a note needs a quote: the words it is about, copied "
-            "from BoardRead."
-        )
-    holding = [
-        (block, held)
-        for block in blocks
-        if (held := _held(block["text"], needle)) is not None
-    ]
-    if not holding:
-        excerpts = "; ".join(block["text"][:60] for block in blocks[:6])
-        raise RuntimeError(
-            f"[SYSTEM SUGGESTION] no block holds {needle!r}. Quote words that are "
-            f"on the page; the document begins: {excerpts}"
-        )
-    whole = [(block, held) for block, held in holding if held == needle]
-    if not whole:
-        # The block holding most of the quote, and the tightest of those on a tie: it
-        # holds the passage the caller meant, so it is the one to quote back.
-        block, partial = max(
-            holding, key=lambda pair: (len(pair[1]), -len(pair[0]["text"]))
-        )
-        raise RuntimeError(
-            f"[SYSTEM SUGGESTION] no block holds the whole quote, so nothing is noted. "
-            f"Block {block['id']} holds {partial!r}: quote exactly that if it is the "
-            "passage you mean. A quote that runs over two paragraphs has to be cut at "
-            "the boundary -- the board anchors inside one block."
-        )
-    return min(whole, key=lambda pair: len(pair[0]["text"]))
 
 
 def _is_note(annotation: dict) -> bool:
@@ -311,14 +277,18 @@ def BoardNote(name: str, quote: str, note: str) -> str:
         holds whole; a quote that runs over two paragraphs is refused, not shortened.
       note: What to say about them.
     """
-    document = _json("GET", _document_path(name))
-    block, held = _block_holding(document["blocks"], quote)
+    document = _json("POST", _document_path(name, "/quote"), {"quote": quote})
     _json(
         "POST",
         _document_path(name, "/annotations"),
-        {"block": block["id"], "quote": held, "note": note, "author": NOTE_AUTHOR},
+        {
+            "block": document["block"],
+            "quote": document["quote"],
+            "note": note,
+            "author": NOTE_AUTHOR,
+        },
     )
-    return f"Noted on block {block['id']}: {note}"
+    return f"Noted on block {document['block']}: {note}"
 
 
 def BoardResolveNote(name: str, note_id: str) -> str:

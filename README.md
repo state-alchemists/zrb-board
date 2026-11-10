@@ -112,6 +112,7 @@ shape itself is the argument.
 | `GET /api/docs/{name}` | html, blocks, and annotations resolved to blocks |
 | `GET /api/docs/{name}/state.md` | **the text view the agent reads** |
 | `PUT /api/docs/{name}` | `{markdown, rev}` — 409 with the current text on a stale rev |
+| `POST /api/docs/{name}/quote` | `{quote}` — the block a quote lands on, and its words, rendered where it stands |
 | `POST /api/docs/{name}/annotations` | `{block, quote, note, author, start, end}` |
 | `POST /api/docs/{name}/annotations/{id}/resolve` | close a note |
 | `PUT /api/docs/{name}/ink/{block}` | `{quote, strokes}` — replace the strokes drawn on one block |
@@ -128,7 +129,7 @@ the same diff. Nothing in the server imports them — `board.app` runs without z
 | `BoardState` | the marks waiting, then every document with its revision and its open notes (ink and notes counted apart) |
 | `BoardRead` | one document as text: the view — `rev`, then each note beside the passage it is about — or, with `source=True`, the document's own markdown byte for byte, which is the text `BoardWrite` takes |
 | `BoardWrite` | the whole markdown back, stating the revision that was read; a stale revision writes nothing and returns the current text to merge into |
-| `BoardNote` | a note on a quoted passage — the quote is matched against the block's *visible* words, so a quote copied with its `**`, `##`, link or line break still anchors |
+| `BoardNote` | a note on a quoted passage — the quote is sent to the board, which renders it where it stands (a table row under its header, a link as its words) and returns the block and the words that block holds |
 | `BoardResolveNote` | close a note by the id `BoardRead` shows; ink is refused, because there is nothing to close |
 
 They are registered with zrb by `src/board/zrb_init.py`, which a shell points at:
