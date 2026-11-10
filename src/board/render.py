@@ -30,6 +30,10 @@ class Block:
     # line its block starts on, so it needs the renderer's answer rather than a second
     # reading of the markdown.
     line: int
+    # Whether the block is code. A fenced block shows its lines as they are, so a quote
+    # taken from one is text -- `**foo**` stays those seven characters -- and must not be
+    # rendered as markdown on its own.
+    code: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,7 +97,8 @@ def render(markdown: str) -> Rendered:
         # The first token of a block carries where it starts in the source; an inline
         # token does not, and never opens a block.
         start = next((token.map[0] for token in group if token.map), 0)
-        blocks.append(Block(_block_id(text, seen), text, fragment, start))
+        code = any(token.type in ("fence", "code_block") for token in group)
+        blocks.append(Block(_block_id(text, seen), text, fragment, start, code))
     body = "\n".join(
         f'<section class="block" data-block="{block.id}">{block.html}</section>'
         for block in blocks

@@ -52,6 +52,20 @@ def test_a_definition_inside_a_code_fence_is_code_not_a_definition():
     assert quoting.locate(doc, "See [zrb][ref] here.")[1] == "See [zrb][ref] here."
 
 
+def test_a_quote_from_a_code_block_keeps_its_own_characters():
+    # A fence shows its lines as they are, so `**foo**` there is seven characters and not
+    # a bold word; the quote keeps them. The same words in prose are rendered as markdown.
+    fenced = "# Q\n\n```\n**foo**\n```\n"
+    assert quoting.locate(fenced, "**foo**")[1] == "**foo**"
+    assert quoting.locate(fenced, "**foo**")[0].startswith("b_")
+    assert quoting.locate("# Q\n\n**foo**\n", "**foo**")[1] == "foo"
+
+
+def test_a_quote_from_an_indented_code_block_is_code_too():
+    doc = "# Q\n\n    **foo**\n"
+    assert quoting.locate(doc, "**foo**")[1] == "**foo**"
+
+
 def test_a_quote_over_two_blocks_is_refused_rather_than_shortened():
     two = "# Q\n\nAlpha paragraph.\n\nBeta paragraph.\n"
     said = quoting.locate(two, "Alpha paragraph.\n\nBeta paragraph.")

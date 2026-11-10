@@ -24,7 +24,18 @@ def locate(markdown: str, quote: str) -> tuple[str, str] | str:
     if at < 0:
         # Already in the page's words: a selection, or a quote copied after a wrap.
         return match(blocks, " ".join(quote.split()))
-    return match(blocks, _where_it_stands(markdown, at, quote))
+    return match(blocks, _where_it_stands(markdown, at, quote, blocks))
+
+
+def _in_code(markdown: str, at: int, blocks: list[render.Block]) -> bool:
+    """Whether a quote starting at *at* begins inside a code block."""
+    line = markdown.count("\n", 0, at)
+    holder = None
+    for block in blocks:
+        if block.line > line:
+            break
+        holder = block
+    return bool(holder and holder.code)
 
 
 def _definitions(markdown: str) -> str:
@@ -47,15 +58,22 @@ def _definitions(markdown: str) -> str:
     return "\n".join(lines)
 
 
-def _where_it_stands(markdown: str, at: int, quote: str) -> str:
+def _where_it_stands(
+    markdown: str, at: int, quote: str, blocks: list[render.Block]
+) -> str:
     """The quote's words, rendered where it stands rather than on its own.
 
-    Two constructs need the document around them. A table row means nothing alone --
+    Three constructs need the document around them. A table row means nothing alone --
     markdown reads `| foo | bar |` by itself as a paragraph -- so a row is rendered under
-    an empty header, which is the one thing its own table gives it. And a reference link
-    is resolved by a definition that lives at the end of the document and belongs to no
-    block, so the definitions travel with the fragment.
+    an empty header, which is the one thing its own table gives it. A reference link is
+    resolved by a definition that lives at the end of the document and belongs to no
+    block, so the definitions travel with the fragment. And a quote taken from a code
+    block is code: `**foo**` in a fence is those seven characters on the page, so it keeps
+    them, where rendering it as markdown would turn it into a bold `foo` and match
+    nothing.
     """
+    if _in_code(markdown, at, blocks):
+        return " ".join(quote.split())
     definitions = _definitions(markdown)
     context = f"{quote}\n\n{definitions}" if definitions else quote
     line = markdown[:at].rsplit("\n", 1)[-1] + quote
