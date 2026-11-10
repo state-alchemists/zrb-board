@@ -81,6 +81,19 @@ def test_should_place_a_note_whose_line_carries_an_image(store):
     assert "## unplaced" not in text
 
 
+def test_should_place_a_note_on_a_quote_that_runs_over_a_hard_wrapped_line(store):
+    # The block is one run of words while the source is wrapped, so the search has to see
+    # the lines as one: the note belongs beside the line the quote starts on.
+    doc = store.create(
+        "0001-question", "# Q\n\nThis is a paragraph\nthat continues here.\n"
+    )
+    text = digest.build_digest(doc, [_note("This is a paragraph that continues here.")])
+    lines = text.splitlines()
+    quoted = lines.index("This is a paragraph")
+    assert "⟦a1 · tara" in lines[quoted + 2]
+    assert "## unplaced" not in text
+
+
 def test_should_place_a_note_on_a_table_row(store):
     # A row is its cells on the page; the source's pipes are not words, and the rule under
     # the header is not a line a note can be about.

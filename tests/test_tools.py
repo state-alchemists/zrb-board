@@ -41,6 +41,13 @@ def test_visible_drops_an_image_the_page_never_shows():
     ) == ({"id": "a", "text": "Before after"}, "Before after")
 
 
+def test_visible_shows_an_escape_as_the_character_itself():
+    # `\*` is `*` on the page and is not emphasis: keeping the backslash matches no block,
+    # and stripping it as markup would turn the escape into the emphasis it escaped.
+    assert tools._visible("literal \\*asterisk\\*") == "literal *asterisk*"
+    assert tools._visible("a \\_name\\_ here") == "a _name_ here"
+
+
 def test_visible_reads_a_table_row_as_the_page_lays_it_out():
     # plain_text renders a row as its cells -- `| foo | bar |` is "foo bar" on the page --
     # and the rule under the header is nowhere at all.

@@ -70,14 +70,21 @@ def _line_index(quote: str, lines: list[str]) -> int | None:
     """The line holding the start of the quote, read the way the page reads it.
 
     A quote arrives as visible words -- from the page, or from a tool that turned the
-    markdown back into them -- while the source line carries the markup. `**Go:** a
-    sentence` must still match the quote `Go: a sentence`, and `See [zrb](https://x.y)`
-    must match `See zrb`; `visible()` reads both sides so they say the same thing.
+    markdown back into them -- while the source line carries the markup. And a paragraph
+    may be hard-wrapped over several lines while its block is one run of words, so the
+    lines are read through `visible()`, joined, and searched as one: the answer is the
+    line the match starts on, which is where the note belongs.
     """
     needle = visible(quote)[:QUOTE_PREFIX]
     if not needle:
         return None
-    for index, line in enumerate(lines):
-        if needle in visible(line):
+    read = [visible(line) for line in lines]
+    at = " ".join(read).find(needle)
+    if at < 0:
+        return None
+    start = 0
+    for index, line in enumerate(read):
+        if at <= start + len(line):
             return index
+        start += len(line) + 1
     return None

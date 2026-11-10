@@ -28,6 +28,10 @@ _SPACE = re.compile(r"\s+")
 # copied from `| foo | bar |` has to become `foo bar`, and the separator row disappears.
 _TABLE_EDGE = re.compile(r"^\s*\|.*\|\s*$")
 _TABLE_SEPARATOR = re.compile(r"^\|?(?:\s*:?-{3,}:?\s*\|)+\s*(?::?-{3,}:?)?\|?$")
+# A backslash escape: the character after it is shown as itself (`\*` is `*`), so it is
+# not markup at all.
+_ESCAPE = re.compile(r"\\([\\`*_{}\[\]()#+\-.!>~|])")
+_PLACEHOLDER = re.compile("\x00(\\d+)\x00")
 
 
 def _table(line: str) -> str:
@@ -39,9 +43,19 @@ def _table(line: str) -> str:
 
 def visible(text: str) -> str:
     """*text* as the page shows it: no markdown, no entities, one space between words."""
-    stripped = "\n".join(_table(line) for line in text.splitlines())
+    # An escaped character is held aside first, so the unwrapping below cannot take `\*`
+    # for emphasis, and put back after it.
+    held: list[str] = []
+
+    def hold(match: re.Match) -> str:
+        held.append(match.group(1))
+        return f"\x00{len(held) - 1}\x00"
+
+    lines = _ESCAPE.sub(hold, text).splitlines()
+    stripped = "\n".join(_table(line) for line in lines)
     for pattern, replacement in _UNWRAP:
         stripped = pattern.sub(replacement, stripped)
+    restored = _PLACEHOLDER.sub(lambda match: held[int(match.group(1))], stripped)
     # `plain_text` unescapes after it strips tags, so `&amp;` in the source reaches a block
     # as `&`; without this a note quoting "Fish &amp; Chips" matches no block at all.
-    return _SPACE.sub(" ", html.unescape(stripped)).strip()
+    return _SPACE.sub(" ", html.unescape(restored)).strip()
