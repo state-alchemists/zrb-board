@@ -76,13 +76,26 @@ def test_block_holding_refuses_a_quote_no_block_holds_whole():
 
 def test_the_read_view_is_told_apart_from_the_document():
     view = (
+        "# Q\n"
         "rev 8173f5fe4d34 · updated 2026-11-10T07:26 · 1 annotation(s)\n"
         "source: docs/0001-question.md\n\n# Q\n\ntext\n"
     )
     assert tools._is_the_read_view(view)
     assert not tools._is_the_read_view("# Q\n\ntext\n")
-    # Either line on its own is a document's own words, not the view's header.
-    assert not tools._is_the_read_view("source: docs/0001-question.md\n")
+    # A document may quote a digest of its own further down, and that is its business:
+    # only the start of the text is read.
+    quoted = "# Example\n\nA view looks like this:\n\n" + view
+    assert not tools._is_the_read_view(quoted)
+
+
+def test_the_source_view_is_the_document_itself(monkeypatch):
+    # Nothing wrapped around it: what BoardRead(source=True) returns is byte for byte what
+    # BoardWrite takes, so a caller cannot paste a wrapper back into the file.
+    markdown = "# Q\n\ntext\n"
+    monkeypatch.setattr(
+        tools, "_json", lambda *args, **kwargs: {"rev": "abc", "markdown": markdown}
+    )
+    assert tools.BoardRead("0001-question", source=True) == markdown
 
 
 def test_block_holding_refuses_a_quote_with_no_words():

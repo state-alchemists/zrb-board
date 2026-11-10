@@ -126,7 +126,7 @@ the same diff. Nothing in the server imports them — `board.app` runs without z
 | Tool | What it does |
 |---|---|
 | `BoardState` | the marks waiting, then every document with its revision and its open notes (ink and notes counted apart) |
-| `BoardRead` | one document as text: the view — `rev`, then each note beside the passage it is about — or, with `source=True`, the document's own fenced markdown, which is the text `BoardWrite` takes |
+| `BoardRead` | one document as text: the view — `rev`, then each note beside the passage it is about — or, with `source=True`, the document's own markdown byte for byte, which is the text `BoardWrite` takes |
 | `BoardWrite` | the whole markdown back, stating the revision that was read; a stale revision writes nothing and returns the current text to merge into |
 | `BoardNote` | a note on a quoted passage — the quote is matched against the block's *visible* words, so a quote copied with its `**`, `##`, link or line break still anchors |
 | `BoardResolveNote` | close a note by the id `BoardRead` shows; ink is refused, because there is nothing to close |

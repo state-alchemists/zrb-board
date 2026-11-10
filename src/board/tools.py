@@ -76,20 +76,27 @@ def _document_path(name: str, suffix: str = "") -> str:
     return f"/api/docs/{urllib.parse.quote(name)}{suffix}"
 
 
-# The two lines that only a digest carries (`digest.build_digest`): a revision line and
-# the file it came from. A document could hold either on its own; both together, right
-# above the body, are the read's view of the file and nothing else.
-_DIGEST_REV = re.compile(r"(?m)^rev \w+ · updated \S+ · \d+ annotation\(s\)$")
-_DIGEST_SOURCE = re.compile(r"(?m)^source: docs/\S+\.md$")
+# The view `digest.build_digest` writes opens with three lines nothing else does: a title,
+# a revision line, and the file it came from. Only the start is read -- a document may
+# quote a digest of its own further down, and that is the document's business.
+_DIGEST_REV = re.compile(r"^rev \w+ · updated \S+ · \d+ annotation\(s\)$")
+_DIGEST_SOURCE = re.compile(r"^source: docs/\S+\.md$")
 
 
 def _is_the_read_view(markdown: str) -> bool:
-    """Whether *markdown* is what BoardRead printed, rather than the document itself.
+    """Whether *markdown* is what BoardRead printed, rather than a document.
 
-    Writing the view back would make its title, revision, source line and note markers
-    part of the document for good. BoardRead(source=True) is the text BoardWrite takes.
+    Writing the view back would make its title, revision line, source line and note
+    markers part of the document for good. BoardRead(source=True) is the text BoardWrite
+    takes; this only catches a caller who pasted the default read by mistake.
     """
-    return bool(_DIGEST_REV.search(markdown) and _DIGEST_SOURCE.search(markdown))
+    lines = markdown.splitlines()[:3]
+    return (
+        len(lines) == 3
+        and lines[0].startswith("# ")
+        and bool(_DIGEST_REV.match(lines[1]))
+        and bool(_DIGEST_SOURCE.match(lines[2]))
+    )
 
 
 def _held(block_text: str, needle: str) -> str | None:
@@ -227,18 +234,14 @@ def BoardRead(name: str, source: bool = False) -> str:
 
     Args:
       name: A document name, as BoardState prints it.
-      source: True gives the document's own markdown in a fence, with the revision above
-        it: that is the text BoardWrite takes back after an edit. Use it to write, and
-        the view to think.
+      source: True gives the document's own markdown, byte for byte, with nothing added
+        around it: that is the text BoardWrite takes back. Its revision is the one
+        BoardState prints for the document, or the first line of the default view. Use
+        the source to write, and the view to think.
     """
     if not source:
         return _request("GET", _document_path(name, "/state.md"))[1]
-    document = _json("GET", _document_path(name))
-    fence = "````"
-    return (
-        f"rev {document['rev']}\n\n{fence}markdown\n"
-        f"{document['markdown'].rstrip()}\n{fence}\n"
-    )
+    return _json("GET", _document_path(name))["markdown"]
 
 
 def BoardWrite(name: str, markdown: str, rev: str) -> str:
