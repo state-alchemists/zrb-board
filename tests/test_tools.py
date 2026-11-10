@@ -27,6 +27,14 @@ def test_marks_fold_per_document_and_keep_the_newest_time():
     assert tools._marks_waiting([]) == ["(no marks waiting)"]
 
 
+def test_a_conflict_is_recognised_even_when_the_document_is_empty():
+    # A stale write against an empty document must still come back as the merge response,
+    # so the body's keys decide, not its values.
+    assert tools._is_conflict({"rev": "abc", "markdown": ""})
+    assert not tools._is_conflict({"detail": "no document named nope"})
+    assert not tools._is_conflict("not a body")
+
+
 def test_the_read_view_is_told_apart_from_the_document():
     view = (
         "# Q\n"

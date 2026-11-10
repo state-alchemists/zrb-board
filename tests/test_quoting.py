@@ -36,6 +36,14 @@ def test_a_quote_already_in_the_page_s_words_lands():
     )
 
 
+def test_a_quote_with_a_reference_link_lands_on_its_words():
+    # `[zrb][ref]` is only a link because a definition at the end of the document says so;
+    # the definition belongs to no block, so it travels with the fragment.
+    doc = "# Q\n\nSee [zrb][ref] here.\n\n[ref]: https://x.y\n"
+    assert quoting.locate(doc, "See [zrb][ref] here.")[1] == "See zrb here."
+    assert quoting.locate(doc, "[zrb][ref]")[1] == "zrb"
+
+
 def test_a_quote_over_two_blocks_is_refused_rather_than_shortened():
     two = "# Q\n\nAlpha paragraph.\n\nBeta paragraph.\n"
     said = quoting.locate(two, "Alpha paragraph.\n\nBeta paragraph.")

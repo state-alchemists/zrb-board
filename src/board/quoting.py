@@ -12,7 +12,12 @@ a wrap -- is matched as it is, against the block text the page renders.
 
 from __future__ import annotations
 
+import re
+
 from board import render
+
+# A link reference definition: at the end of a document, and part of no block.
+_DEFINITION = re.compile(r"(?m)^\s*\[[^\]]+\]:\s*\S+.*$")
 
 
 def locate(markdown: str, quote: str) -> tuple[str, str] | str:
@@ -27,20 +32,26 @@ def locate(markdown: str, quote: str) -> tuple[str, str] | str:
     return match(blocks, _where_it_stands(markdown, at, quote))
 
 
+_DEFINITION = re.compile(r"(?m)^\s*\[[^\]]+\]:\s*\S+.*$")
+
+
 def _where_it_stands(markdown: str, at: int, quote: str) -> str:
     """The quote's words, rendered where it stands rather than on its own.
 
-    A table row means nothing alone -- markdown reads `| foo | bar |` by itself as a
-    paragraph -- so a row is rendered under an empty header, which is the one thing its
-    own table gives it and the block keeps only the cells. Every other construct renders
-    the same alone as in place.
+    Two constructs need the document around them. A table row means nothing alone --
+    markdown reads `| foo | bar |` by itself as a paragraph -- so a row is rendered under
+    an empty header, which is the one thing its own table gives it. And a reference link
+    is resolved by a definition that lives at the end of the document and belongs to no
+    block, so the definitions travel with the fragment.
     """
+    definitions = "\n".join(_DEFINITION.findall(markdown))
+    context = f"{quote}\n\n{definitions}" if definitions else quote
     line = markdown[:at].rsplit("\n", 1)[-1] + quote
     if line.lstrip().startswith("|"):
-        rendered = render.render(f"|  |  |\n| --- | --- |\n{quote}").blocks
+        rendered = render.render(f"|  |  |\n| --- | --- |\n{context}").blocks
     else:
-        rendered = render.render(quote).blocks
-    return " ".join(block.text for block in rendered)
+        rendered = render.render(context).blocks
+    return " ".join(block.text for block in rendered if block.text)
 
 
 def match(blocks: list[render.Block], needle: str) -> tuple[str, str] | str:

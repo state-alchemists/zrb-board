@@ -57,6 +57,15 @@ class BoardConflict(RuntimeError):
         self.markdown = payload.get("markdown", "")
 
 
+def _is_conflict(payload: object) -> bool:
+    """Whether a 409 body carries the current document, as `store.RevConflict` writes it.
+
+    The keys are what make it a conflict, not the values: a document can be empty, and
+    then `markdown` is a perfectly good empty string.
+    """
+    return isinstance(payload, dict) and "rev" in payload and "markdown" in payload
+
+
 def _request(method: str, path: str, payload: dict | None = None) -> tuple[str, str]:
     """Call the board, returning `(content type, body)` or raising why it failed."""
     body = None if payload is None else json.dumps(payload).encode("utf-8")
@@ -76,7 +85,7 @@ def _request(method: str, path: str, payload: dict | None = None) -> tuple[str, 
                 payload = json.loads(detail)
             except json.JSONDecodeError:
                 pass
-            if isinstance(payload, dict) and payload.get("rev") and payload.get("markdown"):
+            if isinstance(payload, dict) and _is_conflict(payload):
                 raise BoardConflict(payload) from None
             # A refusal from the board is written for the caller; its `detail` is the
             # sentence, and the JSON around it is noise.
