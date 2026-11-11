@@ -30,6 +30,11 @@ jobs:
           # that spells a path differently runs the same suite.
           - os: macos-26
             python-version: "3.13"
+          # The background start asks the OS about processes, and the three answer
+          # differently -- signal 0, /proc, and Windows' OpenProcess. A finding about the
+          # Windows answer cannot be caught by Linux, so the job exists to catch it.
+          - os: windows-2025-vs2026
+            python-version: "3.13"
 
     steps:
       - name: Check out repository code

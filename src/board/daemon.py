@@ -145,6 +145,37 @@ def running(pid: int) -> bool:
     return _not_a_zombie(pid)
 
 
+def _kernel32():
+    """Windows' kernel32, with the signatures this module relies on declared.
+
+    ctypes assumes a function returns `c_int`, and on 64-bit Windows a HANDLE does not fit
+    in one: the call succeeds and everything after it operates on a truncated handle, so a
+    live process reads as dead. Declaring them is not tidiness here, it is correctness.
+    """
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel32.CloseHandle.restype = wintypes.BOOL
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel32.GetExitCodeProcess.restype = wintypes.BOOL
+    kernel32.GetExitCodeProcess.argtypes = [
+        wintypes.HANDLE,
+        ctypes.POINTER(wintypes.DWORD),
+    ]
+    kernel32.GetProcessTimes.restype = wintypes.BOOL
+    kernel32.GetProcessTimes.argtypes = [
+        wintypes.HANDLE,
+        ctypes.POINTER(wintypes.FILETIME),
+        ctypes.POINTER(wintypes.FILETIME),
+        ctypes.POINTER(wintypes.FILETIME),
+        ctypes.POINTER(wintypes.FILETIME),
+    ]
+    return ctypes, wintypes, kernel32
+
+
 def _running_on_windows(pid: int) -> bool:
     """Ask Windows whether a process is still running, without touching it.
 
@@ -152,16 +183,14 @@ def _running_on_windows(pid: int) -> bool:
     fails for a pid that is gone, and `GetExitCodeProcess` separates a live process from a
     dead one whose object another handle is still holding open.
     """
-    import ctypes
-
+    ctypes, wintypes, kernel32 = _kernel32()
     PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
     STILL_ACTIVE = 259
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
     handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
     if not handle:
         return False
     try:
-        code = ctypes.c_ulong()
+        code = wintypes.DWORD()
         if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
             return False
         return code.value == STILL_ACTIVE
@@ -237,19 +266,13 @@ def started_at(pid: int) -> str | None:
 
 def _windows_started_at(pid: int) -> str | None:
     """The process's creation time, so a reused pid can be told from the original."""
-    import ctypes
-
+    ctypes, wintypes, kernel32 = _kernel32()
     PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-
-    class FileTime(ctypes.Structure):
-        _fields_ = [("low", ctypes.c_ulong), ("high", ctypes.c_ulong)]
-
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
     handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
     if not handle:
         return None
     try:
-        created, exited, kernel, user = FileTime(), FileTime(), FileTime(), FileTime()
+        created, exited, kernel, user = (wintypes.FILETIME() for _ in range(4))
         asked = kernel32.GetProcessTimes(
             handle,
             ctypes.byref(created),
@@ -259,7 +282,7 @@ def _windows_started_at(pid: int) -> str | None:
         )
         if not asked:
             return None
-        return str((created.high << 32) | created.low)
+        return str((created.dwHighDateTime << 32) | created.dwLowDateTime)
     finally:
         kernel32.CloseHandle(handle)
 
