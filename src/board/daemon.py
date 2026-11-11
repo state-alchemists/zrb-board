@@ -156,7 +156,7 @@ def _running_on_windows(pid: int) -> bool:
 
     PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
     STILL_ACTIVE = 259
-    kernel32 = ctypes.windll.kernel32
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
     handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
     if not handle:
         return False
@@ -207,13 +207,15 @@ def read_identity(path: Path) -> str | None:
 
 
 def started_at(pid: int) -> str | None:
-    """When the process began, as the system reports it, or None where it does not.
+    """When the process began, as the system reports it, or None where it cannot be read.
 
     A pid is reused: the number in a file left behind by a crash can belong to something
     else entirely by the time `stop` reads it, and signalling that would be worse than
-    leaving the board alone. Linux gives this in `/proc`, macOS through `ps`; Windows'
-    identity would need a handle, so there the file is taken at its word.
+    leaving the board alone. Linux gives this in `/proc`, macOS through `ps`, Windows
+    through the process's own creation time.
     """
+    if os.name == "nt":
+        return _windows_started_at(pid)
     try:
         stat = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8", errors="replace")
     except OSError:
@@ -231,6 +233,35 @@ def started_at(pid: int) -> str | None:
     except OSError:
         return None
     return answered or None
+
+
+def _windows_started_at(pid: int) -> str | None:
+    """The process's creation time, so a reused pid can be told from the original."""
+    import ctypes
+
+    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+
+    class FileTime(ctypes.Structure):
+        _fields_ = [("low", ctypes.c_ulong), ("high", ctypes.c_ulong)]
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    if not handle:
+        return None
+    try:
+        created, exited, kernel, user = FileTime(), FileTime(), FileTime(), FileTime()
+        asked = kernel32.GetProcessTimes(
+            handle,
+            ctypes.byref(created),
+            ctypes.byref(exited),
+            ctypes.byref(kernel),
+            ctypes.byref(user),
+        )
+        if not asked:
+            return None
+        return str((created.high << 32) | created.low)
+    finally:
+        kernel32.CloseHandle(handle)
 
 
 def write_pid(path: Path, pid: int) -> None:
