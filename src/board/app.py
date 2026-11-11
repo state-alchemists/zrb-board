@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+import time
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as package_version
 from pathlib import Path
@@ -13,7 +14,7 @@ from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from board import anchors, config, digest, quoting, render
+from board import anchors, config, daemon, digest, quoting, render
 from board.render import Block
 from board.store import Doc, DocNotFound, INK_AUTHOR, RevConflict, Store
 
@@ -255,12 +256,110 @@ def _register_routes(app: FastAPI, store: Store) -> None:
         return {"ok": True}
 
 
+USAGE = """\
+zrb-board — the board's server, and the agent's side of it
+
+    zrb-board              serve on board.config's host and port
+    zrb-board -d           serve in the background, with a pid file and a log
+    zrb-board stop         stop the background server
+    zrb-board status       whether it is running, and whether it answers
+    zrb-board init-path    print board/zrb_init.py, for ZRB_INIT_SCRIPTS
+    zrb-board --version    print the installed version
+"""
+
+
+def _board_url() -> str:
+    return f"{config.url()}/api/docs"
+
+
+def background() -> None:
+    """Start a detached copy of this program and return; the copy is what serves.
+
+    The pid is written before the wait, so `stop` finds it even if the copy dies on the way
+    up. The wait is only so that the command can say whether the board actually answered
+    rather than leaving you to guess.
+
+    The answer is re-read inside the lock, not before it: two commands that ask "is it up"
+    at the same moment both hear "no", and both would start a server. The lock is what
+    turns that pair of reads into one answer.
+    """
+    home = config.home()
+    home.mkdir(parents=True, exist_ok=True)
+    url = _board_url()
+    with daemon.only_one(daemon.lock_path(home)) as alone:
+        if not alone:
+            # Someone else is starting it. Their child is the one that will serve, so wait
+            # for it rather than starting a second on the same port.
+            for _ in range(50):
+                if daemon.answering(url):
+                    print(f"Another `zrb-board -d` started it: serving at {url}.")
+                    return
+                time.sleep(0.1)
+            print("Another `zrb-board -d` is starting the board: nothing started.")
+            return
+        if daemon.answering(url):
+            print(f"Already serving at {url}: nothing started.")
+            return
+        recorded = daemon.read_pid(daemon.pid_path(home))
+        if recorded is not None and daemon.running(recorded):
+            recorded_id = daemon.read_identity(daemon.pid_path(home))
+            if recorded_id and recorded_id == daemon.started_at(recorded):
+                # A live pid that does not answer yet is a board still coming up -- slow
+                # disk, slow import -- and starting a second one would fight it for the port.
+                print(
+                    f"pid {recorded} is recorded as the board and is still running, though "
+                    f"nothing answers at {url} yet: `zrb-board status` will say more."
+                )
+                return
+            # Something else holds that pid now, so the file is stale rather than slow.
+            daemon.pid_path(home).unlink(missing_ok=True)
+        log = daemon.log_path(home)
+        pid = daemon.detach([sys.executable, "-m", "board.app"], log)
+        daemon.write_pid(daemon.pid_path(home), pid)
+        for _ in range(50):
+            if daemon.answering(url):
+                print(f"Serving in the background as pid {pid}: {url}")
+                print(f"Log: {log}")
+                return
+            if not daemon.running(pid):
+                break
+            time.sleep(0.1)
+    print(f"Started pid {pid}, but nothing answers at {url} yet. Log: {log}")
+
+
 def main() -> None:
+    args = sys.argv[1:]
     # `zrb-board init-path` is how a shell points ZRB_INIT_SCRIPTS at the agent's side of
     # the board (board/zrb_init.py); it prints a path and starts nothing.
-    if sys.argv[1:] == ["init-path"]:
+    if args == ["init-path"]:
         print(Path(__file__).with_name("zrb_init.py"))
         return
+    if args in (["-V"], ["--version"]):
+        print(installed_version())
+        return
+    if args in (["-h"], ["--help"]):
+        print(USAGE)
+        return
+    if args in (["-d"], ["--background"]):
+        background()
+        return
+    if args == ["stop"]:
+        home = config.home()
+        with daemon.only_one(daemon.lock_path(home)) as alone:
+            if not alone:
+                print("A board is being started or stopped right now: try again in a moment.")
+                return
+            print(daemon.stop(daemon.pid_path(home)))
+        return
+    if args == ["status"]:
+        print(daemon.describe(daemon.pid_path(config.home()), _board_url()))
+        return
+    # An argument this program does not know used to start a server anyway: `--version`
+    # served the board and said nothing about the version. Say so and start nothing.
+    if args:
+        print(f"zrb-board: unknown argument {args[0]!r}", file=sys.stderr)
+        print("Run `zrb-board --help` for what it takes.", file=sys.stderr)
+        raise SystemExit(2)
     uvicorn.run(create_app(), host=config.host(), port=config.port())
 
 

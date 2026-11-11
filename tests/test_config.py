@@ -42,6 +42,21 @@ def test_the_address_is_the_desk_and_the_port_is_known(monkeypatch):
     assert config.port() == 8765
 
 
+def test_the_url_is_where_you_connect_not_where_it_binds(monkeypatch):
+    # `0.0.0.0` and `::` are not places to connect; an IPv6 literal would read its own
+    # colon as the port separator if it were not bracketed.
+    monkeypatch.setenv("ZRB_BOARD_PORT", "8765")
+    for bound, reached in (
+        ("127.0.0.1", "http://127.0.0.1:8765"),
+        ("0.0.0.0", "http://127.0.0.1:8765"),
+        ("::", "http://127.0.0.1:8765"),
+        ("::1", "http://[::1]:8765"),
+        ("[::1]", "http://[::1]:8765"),
+    ):
+        monkeypatch.setenv("ZRB_BOARD_HOST", bound)
+        assert config.url() == reached, bound
+
+
 def test_the_server_builds_its_store_from_the_configuration(monkeypatch, tmp_path):
     monkeypatch.setenv("ZRB_BOARD_HOME", str(tmp_path))
     from board.app import create_app

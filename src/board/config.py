@@ -72,3 +72,19 @@ def host() -> str:
 
 def port() -> int:
     return int(env_get("PORT", str(DEFAULT_PORT)))
+
+
+def url() -> str:
+    """Where the board is *reached*, from the address it *binds*.
+
+    A bind address is not always a place to connect: `0.0.0.0` and `::` mean "every
+    address", so they are reached at the loopback. An IPv6 literal is bracketed, or the
+    colon in it reads as the port separator. Both the agent's tools and the command line
+    ask this, so `zrb-board status` and `BoardState` cannot disagree about where it is.
+    """
+    address = host().strip() or DEFAULT_HOST
+    if address in ("0.0.0.0", "::"):
+        address = "127.0.0.1"
+    elif ":" in address and not address.startswith("["):
+        address = f"[{address}]"
+    return f"http://{address}:{port()}"

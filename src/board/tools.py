@@ -26,15 +26,10 @@ def _default_url() -> str:
     """Where the server listens, read from the settings that bind it.
 
     `ZRB_BOARD_HOST` and `ZRB_BOARD_PORT` are the server's own, so a board moved to another
-    port is still found. A bind address that is not a place to connect -- `0.0.0.0` or
-    `::` -- is reached at the loopback, and an IPv6 literal keeps its brackets.
+    port is still found; `config.url()` is the one place that turns the bind address into
+    something connectable, and the command line asks it too.
     """
-    host = config.host().strip() or config.DEFAULT_HOST
-    if host in ("0.0.0.0", "::"):
-        host = "127.0.0.1"
-    elif ":" in host and not host.startswith("["):
-        host = f"[{host}]"
-    return f"http://{host}:{config.port()}"
+    return config.url()
 
 
 BOARD_URL = (os.environ.get("BOARD_URL") or _default_url()).rstrip("/")

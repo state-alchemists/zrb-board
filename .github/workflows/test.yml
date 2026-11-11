@@ -30,6 +30,11 @@ jobs:
           # that spells a path differently runs the same suite.
           - os: macos-26
             python-version: "3.13"
+          # The background start asks the OS about processes, and the three answer
+          # differently -- signal 0, /proc, and Windows' OpenProcess. A finding about the
+          # Windows answer cannot be caught by Linux, so the job exists to catch it.
+          - os: windows-2025-vs2026
+            python-version: "3.13"
 
     steps:
       - name: Check out repository code
@@ -62,5 +67,7 @@ jobs:
 
       - name: Test the pen
         # Unquoted: node 20's test runner does not expand a pattern itself, and the
-        # shell already did it before node was asked.
+        # shell already did it before node was asked. `shell: bash` because PowerShell
+        # does not expand it and hands node the literal pattern.
+        shell: bash
         run: node --test tests-js/*.test.js

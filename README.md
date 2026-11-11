@@ -51,6 +51,39 @@ read from `_ZRB_ENV_PREFIX`, so a white-labeled zrb needs no code change:
 
 It binds loopback only and has no authentication — it is a desk, not a service.
 
+## Run it in the background
+
+```bash
+zrb-board -d        # starts a detached copy, writes ~/.zrb/board/board.pid, exits
+zrb-board status    # running or not, which pid, and whether it answers
+zrb-board stop      # SIGTERM that pid, and remove the file
+```
+
+`-d` spawns a second copy of the program with no terminal attached and points its output at
+`~/.zrb/board/board.log`; nothing is left holding it, so closing the terminal does not close
+the board. On POSIX the child gets a session of its own (`start_new_session`); on Windows it
+gets no console (`DETACHED_PROCESS`) and a process group of its own. Those are the same
+promise by two names, and it is the only platform difference in here.
+
+What it does **not** do, on purpose: restart after a crash, or start when the machine boots.
+Both need a supervisor, and every system ships one — `systemd --user` on Linux, Task
+Scheduler on Windows, `launchd` on macOS. A unit file is four lines:
+
+```ini
+# ~/.config/systemd/user/zrb-board.service
+[Unit]
+Description=zrb-board
+[Service]
+ExecStart=%h/.local/bin/zrb-board
+Restart=on-failure
+[Install]
+WantedBy=default.target
+```
+
+```bash
+systemctl --user daemon-reload && systemctl --user enable --now zrb-board
+```
+
 ## The board
 
 ```
