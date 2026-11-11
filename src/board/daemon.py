@@ -17,6 +17,7 @@ from __future__ import annotations
 import os
 import signal
 import subprocess
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -98,11 +99,59 @@ def _not_a_zombie(pid: int) -> bool:
 
 
 def read_pid(path: Path) -> int | None:
-    """The pid in *path*, or None when it is missing or is not a number."""
+    """The pid in the first line of *path*, or None when it is missing or not a number."""
+    line = (read_lines(path) or [""])[0]
     try:
-        return int(path.read_text(encoding="utf-8").strip())
-    except (OSError, ValueError):
+        return int(line.strip())
+    except ValueError:
         return None
+
+
+def read_lines(path: Path) -> list[str] | None:
+    try:
+        return path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return None
+
+
+def read_identity(path: Path) -> str | None:
+    """The start time written beside the pid, so a reused pid is not mistaken for it."""
+    lines = read_lines(path) or []
+    return lines[1].strip() if len(lines) > 1 and lines[1].strip() else None
+
+
+def started_at(pid: int) -> str | None:
+    """When the process began, as the system reports it, or None where it does not.
+
+    A pid is reused: the number in a file left behind by a crash can belong to something
+    else entirely by the time `stop` reads it, and signalling that would be worse than
+    leaving the board alone. Linux gives this in `/proc`, macOS through `ps`; Windows'
+    identity would need a handle, so there the file is taken at its word.
+    """
+    try:
+        stat = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        pass
+    else:
+        fields = stat.rsplit(")", 1)[-1].split()
+        if len(fields) > 19:
+            return fields[19]
+    try:
+        answered = subprocess.run(
+            ["ps", "-o", "lstart=", "-p", str(pid)],
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+    except OSError:
+        return None
+    return answered or None
+
+
+def write_pid(path: Path, pid: int) -> None:
+    """Write the pid, and what the system says its process began, for `stop` to check."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    identity = started_at(pid) or ""
+    path.write_text(f"{pid}\n{identity}\n", encoding="utf-8")
 
 
 def answering(url: str, timeout: float = 1.0) -> bool:
@@ -121,6 +170,11 @@ def stop(path: Path) -> str:
     send, so `os.kill` there terminates the process instead -- which is safe here because
     every write the board does is a rename into place, so a process killed mid-sentence
     leaves either the old file or the new one.
+
+    Two things this does that a bare `kill` does not. It waits for the process to go, so
+    `stop && zrb-board -d` starts a board instead of finding the dying one still answering;
+    and it checks that the pid is still the process the file was written for, because a pid
+    left behind by a crash can be someone else's by the time this runs.
     """
     pid = read_pid(path)
     if pid is None:
@@ -128,10 +182,25 @@ def stop(path: Path) -> str:
     if not running(pid):
         path.unlink(missing_ok=True)
         return f"Nothing to stop: pid {pid} is gone; removed the stale pid file."
+    expected = read_identity(path)
+    current = started_at(pid)
+    if expected and current and expected != current:
+        path.unlink(missing_ok=True)
+        return (
+            f"Refused: pid {pid} began at {current}, and this file was written for the "
+            "process that began at "
+            f"{expected}. Nothing was signalled; the stale pid file was removed."
+        )
     try:
         os.kill(pid, signal.SIGTERM)
     except OSError as failure:
         return f"Could not stop pid {pid}: {failure}"
+    for _ in range(100):
+        if not running(pid):
+            break
+        time.sleep(0.05)
+    if running(pid):
+        return f"Signalled pid {pid}, but it is still running; left its pid file in place."
     path.unlink(missing_ok=True)
     return f"Stopped pid {pid}."
 

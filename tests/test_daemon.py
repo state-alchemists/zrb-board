@@ -10,16 +10,26 @@ import signal
 import sys
 import time
 
-import pytest
-
 from board import app as app_module
 from board import daemon
 
 
 def _alive(pid, seconds=2.0):
-    """Whether *pid* is still there, waiting a moment for a dying child to go."""
+    """Whether *pid* is still there, collecting it first where the system makes it ours.
+
+    A child that has exited but not been collected still answers signal 0. On Linux
+    `running()` sees the `Z` in `/proc` and says so; on macOS there is no `/proc`, so the
+    test has to do the collecting itself -- which is the honest shape anyway: this test
+    process is the parent, so reaping is its job and not the board's.
+    """
     deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:
+        if os.name != "nt":
+            try:
+                if os.waitpid(pid, os.WNOHANG)[0]:
+                    return False
+            except ChildProcessError:
+                return False
         if not daemon.running(pid):
             return False
         time.sleep(0.05)
@@ -85,6 +95,33 @@ def test_should_stop_a_running_child(tmp_path):
     assert not _alive(pid)
 
 
+def test_should_leave_alone_a_pid_that_is_no_longer_the_board(tmp_path):
+    # A pid file left by a crash can name a process that has nothing to do with the board:
+    # signalling it would be worse than doing nothing, so the file records when the process
+    # began and `stop` checks it before it kills anything.
+    path = tmp_path / "board.pid"
+    pid = daemon.detach([sys.executable, "-c", "import time; time.sleep(30)"], tmp_path / "log")
+    try:
+        path.write_text(f"{pid}\nbegan-somewhere-else\n", encoding="utf-8")
+        said = daemon.stop(path)
+        assert "Refused" in said
+        assert not path.exists(), "the stale file should still be cleared"
+        assert daemon.running(pid), "it was not ours to kill, and it was not killed"
+    finally:
+        os.kill(pid, signal.SIGTERM)
+
+
+def test_should_wait_for_the_process_to_go_before_reporting_stopped(tmp_path):
+    # `stop && zrb-board -d` is a normal thing to type; if stop returned while the server
+    # was still shutting down, the -d would find it answering and start nothing.
+    path = tmp_path / "board.pid"
+    pid = daemon.detach([sys.executable, "-c", "import time; time.sleep(30)"], tmp_path / "log")
+    daemon.write_pid(path, pid)
+    said = daemon.stop(path)
+    assert "Stopped" in said
+    assert not daemon.running(pid), "stop reported success while the process was alive"
+
+
 def test_should_describe_a_board_that_is_not_there(tmp_path):
     said = daemon.describe(tmp_path / "board.pid", "http://127.0.0.1:1/api/docs")
     assert "not running" in said
@@ -112,7 +149,7 @@ def test_should_start_a_detached_copy_and_write_its_pid(tmp_path, monkeypatch, c
     app_module.main()
 
     assert started and started[0][0][-2:] == ["-m", "board.app"]
-    assert (tmp_path / "board.pid").read_text(encoding="utf-8") == "4242"
+    assert daemon.read_pid(tmp_path / "board.pid") == 4242
     assert "Serving in the background as pid 4242" in capsys.readouterr().out
 
 

@@ -269,7 +269,7 @@ zrb-board — the board's server, and the agent's side of it
 
 
 def _board_url() -> str:
-    return f"http://{config.host()}:{config.port()}/api/docs"
+    return f"{config.url()}/api/docs"
 
 
 def background() -> None:
@@ -287,7 +287,7 @@ def background() -> None:
     home.mkdir(parents=True, exist_ok=True)
     log = daemon.log_path(home)
     pid = daemon.detach([sys.executable, "-m", "board.app"], log)
-    daemon.pid_path(home).write_text(str(pid), encoding="utf-8")
+    daemon.write_pid(daemon.pid_path(home), pid)
     for _ in range(50):
         if daemon.answering(url):
             print(f"Serving in the background as pid {pid}: {url}")
