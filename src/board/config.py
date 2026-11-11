@@ -33,6 +33,9 @@ PREFIX_VAR = "_ZRB_ENV_PREFIX"
 DEFAULT_PREFIX = "ZRB"
 DEFAULT_HOME = "~/.zrb/board"
 DEFAULT_HOST = "127.0.0.1"
+# Quad digits, easy to say and to type; nothing is registered to it. It only has to stay
+# clear of zrb's web port (21213), which a board URL is often pasted next to -- and it is
+# a default, not a decision: ZRB_BOARD_PORT moves it.
 DEFAULT_PORT = 8765
 
 

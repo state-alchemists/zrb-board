@@ -51,6 +51,10 @@ read from `_ZRB_ENV_PREFIX`, so a white-labeled zrb needs no code change:
 
 It binds loopback only and has no authentication — it is a desk, not a service.
 
+`8765` is quad digits, easy to say and to type, and nothing is registered to it. It only has
+to stay clear of zrb's web port, `21213`, which a board URL is often pasted next to. It is a
+default rather than a decision: `ZRB_BOARD_PORT` moves it.
+
 ## Run it in the background
 
 ```bash
