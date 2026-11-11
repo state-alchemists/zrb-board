@@ -302,13 +302,17 @@ def background() -> None:
             return
         recorded = daemon.read_pid(daemon.pid_path(home))
         if recorded is not None and daemon.running(recorded):
-            # A live pid that does not answer yet is a board still coming up -- slow disk,
-            # slow import -- and starting a second one would fight it for the port.
-            print(
-                f"pid {recorded} is recorded as the board and is still running, though "
-                f"nothing answers at {url} yet: `zrb-board status` will say more."
-            )
-            return
+            recorded_id = daemon.read_identity(daemon.pid_path(home))
+            if recorded_id and recorded_id == daemon.started_at(recorded):
+                # A live pid that does not answer yet is a board still coming up -- slow
+                # disk, slow import -- and starting a second one would fight it for the port.
+                print(
+                    f"pid {recorded} is recorded as the board and is still running, though "
+                    f"nothing answers at {url} yet: `zrb-board status` will say more."
+                )
+                return
+            # Something else holds that pid now, so the file is stale rather than slow.
+            daemon.pid_path(home).unlink(missing_ok=True)
         log = daemon.log_path(home)
         pid = daemon.detach([sys.executable, "-m", "board.app"], log)
         daemon.write_pid(daemon.pid_path(home), pid)

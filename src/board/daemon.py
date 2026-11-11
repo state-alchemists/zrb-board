@@ -341,6 +341,16 @@ def stop(path: Path) -> str:
             "process that began at "
             f"{expected}. Nothing was signalled; the stale pid file was removed."
         )
+    if not expected:
+        # No identity was recorded -- the child may have died before it could be read --
+        # so there is nothing proving this pid is the board. Refusing to guess is the
+        # only safe answer: a wrong guess kills whatever now holds that number.
+        path.unlink(missing_ok=True)
+        return (
+            f"Refused: pid {pid} is alive but this file records no start time for it, so "
+            "nothing proves it is the board. It was not signalled; stop it by hand if you "
+            "are sure."
+        )
     try:
         os.kill(pid, signal.SIGTERM)
     except OSError as failure:

@@ -67,5 +67,7 @@ jobs:
 
       - name: Test the pen
         # Unquoted: node 20's test runner does not expand a pattern itself, and the
-        # shell already did it before node was asked.
+        # shell already did it before node was asked. `shell: bash` because PowerShell
+        # does not expand it and hands node the literal pattern.
+        shell: bash
         run: node --test tests-js/*.test.js

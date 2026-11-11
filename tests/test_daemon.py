@@ -89,7 +89,7 @@ def test_should_remove_a_stale_pid_file_and_say_so(tmp_path):
 def test_should_stop_a_running_child(tmp_path):
     path = tmp_path / "board.pid"
     pid = daemon.detach([sys.executable, "-c", "import time; time.sleep(30)"], tmp_path / "log")
-    path.write_text(str(pid), encoding="utf-8")
+    daemon.write_pid(path, pid)
     assert "stopped" in daemon.stop(path).lower()
     assert not path.exists()
     assert not _alive(pid)
@@ -152,6 +152,8 @@ def test_should_not_start_a_second_child_while_a_recorded_pid_still_lives(
     monkeypatch.setattr(app_module.daemon, "detach", lambda *a: started.append(a) or 1)
     monkeypatch.setattr(app_module.daemon, "answering", lambda url, timeout=1.0: False)
     monkeypatch.setattr(app_module.daemon, "read_pid", lambda path: 4242)
+    monkeypatch.setattr(app_module.daemon, "read_identity", lambda path: "began-at-noon")
+    monkeypatch.setattr(app_module.daemon, "started_at", lambda pid: "began-at-noon")
     monkeypatch.setattr(app_module.daemon, "running", lambda pid: True)
     monkeypatch.setattr(app_module.config, "home", lambda: tmp_path)
     monkeypatch.setattr(sys, "argv", ["zrb-board", "-d"])
