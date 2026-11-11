@@ -288,10 +288,26 @@ def background() -> None:
     url = _board_url()
     with daemon.only_one(daemon.lock_path(home)) as alone:
         if not alone:
+            # Someone else is starting it. Their child is the one that will serve, so wait
+            # for it rather than starting a second on the same port.
+            for _ in range(50):
+                if daemon.answering(url):
+                    print(f"Another `zrb-board -d` started it: serving at {url}.")
+                    return
+                time.sleep(0.1)
             print("Another `zrb-board -d` is starting the board: nothing started.")
             return
         if daemon.answering(url):
             print(f"Already serving at {url}: nothing started.")
+            return
+        recorded = daemon.read_pid(daemon.pid_path(home))
+        if recorded is not None and daemon.running(recorded):
+            # A live pid that does not answer yet is a board still coming up -- slow disk,
+            # slow import -- and starting a second one would fight it for the port.
+            print(
+                f"pid {recorded} is recorded as the board and is still running, though "
+                f"nothing answers at {url} yet: `zrb-board status` will say more."
+            )
             return
         log = daemon.log_path(home)
         pid = daemon.detach([sys.executable, "-m", "board.app"], log)
@@ -324,7 +340,12 @@ def main() -> None:
         background()
         return
     if args == ["stop"]:
-        print(daemon.stop(daemon.pid_path(config.home())))
+        home = config.home()
+        with daemon.only_one(daemon.lock_path(home)) as alone:
+            if not alone:
+                print("A board is being started or stopped right now: try again in a moment.")
+                return
+            print(daemon.stop(daemon.pid_path(home)))
         return
     if args == ["status"]:
         print(daemon.describe(daemon.pid_path(config.home()), _board_url()))

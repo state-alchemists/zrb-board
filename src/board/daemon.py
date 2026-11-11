@@ -280,6 +280,16 @@ def answering(url: str, timeout: float = 1.0) -> bool:
     return True
 
 
+def _forget(path: Path, pid: int) -> None:
+    """Remove the pid file, unless something else has already claimed it.
+
+    `stop` and `-d` take the same lock now, so this is belt and braces -- but a file that
+    names a different pid is not ours to delete, whoever wrote it.
+    """
+    if read_pid(path) == pid:
+        path.unlink(missing_ok=True)
+
+
 def stop(path: Path) -> str:
     """Stop the process named in *path*, and say what happened.
 
@@ -297,7 +307,7 @@ def stop(path: Path) -> str:
     if pid is None:
         return "Nothing to stop: no pid file, so this board was not started with -d."
     if not running(pid):
-        path.unlink(missing_ok=True)
+        _forget(path, pid)
         return f"Nothing to stop: pid {pid} is gone; removed the stale pid file."
     expected = read_identity(path)
     current = started_at(pid)
@@ -318,7 +328,7 @@ def stop(path: Path) -> str:
         time.sleep(0.05)
     if running(pid):
         return f"Signalled pid {pid}, but it is still running; left its pid file in place."
-    path.unlink(missing_ok=True)
+    _forget(path, pid)
     return f"Stopped pid {pid}."
 
 

@@ -130,7 +130,9 @@ def test_should_refuse_a_second_start_while_one_is_starting(
     started = []
     monkeypatch.setattr(app_module.daemon, "detach", lambda *a: started.append(a) or 1)
     monkeypatch.setattr(app_module.daemon, "answering", lambda url, timeout=1.0: False)
+    monkeypatch.setattr(app_module.daemon, "read_pid", lambda path: None)
     monkeypatch.setattr(app_module.config, "home", lambda: tmp_path)
+    monkeypatch.setattr(app_module.time, "sleep", lambda seconds: None)
     monkeypatch.setattr(sys, "argv", ["zrb-board", "-d"])
 
     with app_module.daemon.only_one(app_module.daemon.lock_path(tmp_path)) as held:
@@ -139,6 +141,25 @@ def test_should_refuse_a_second_start_while_one_is_starting(
 
     assert started == []
     assert "Another" in capsys.readouterr().out
+
+
+def test_should_not_start_a_second_child_while_a_recorded_pid_still_lives(
+    tmp_path, monkeypatch, capsys
+):
+    # A board that is slow to bind is not a board that is absent: starting a second child
+    # would have the two fight for the port, and the pid file could name the loser.
+    started = []
+    monkeypatch.setattr(app_module.daemon, "detach", lambda *a: started.append(a) or 1)
+    monkeypatch.setattr(app_module.daemon, "answering", lambda url, timeout=1.0: False)
+    monkeypatch.setattr(app_module.daemon, "read_pid", lambda path: 4242)
+    monkeypatch.setattr(app_module.daemon, "running", lambda pid: True)
+    monkeypatch.setattr(app_module.config, "home", lambda: tmp_path)
+    monkeypatch.setattr(sys, "argv", ["zrb-board", "-d"])
+
+    app_module.main()
+
+    assert started == []
+    assert "still running" in capsys.readouterr().out
 
 
 def test_should_say_a_pid_belongs_to_another_process(tmp_path):
