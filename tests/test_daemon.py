@@ -122,6 +122,36 @@ def test_should_wait_for_the_process_to_go_before_reporting_stopped(tmp_path):
     assert not daemon.running(pid), "stop reported success while the process was alive"
 
 
+def test_should_refuse_a_second_start_while_one_is_starting(
+    tmp_path, monkeypatch, capsys
+):
+    # Two `-d` at the same moment both hear "not answering" and both start a server; the
+    # lock is what turns that pair of reads into one answer.
+    started = []
+    monkeypatch.setattr(app_module.daemon, "detach", lambda *a: started.append(a) or 1)
+    monkeypatch.setattr(app_module.daemon, "answering", lambda url, timeout=1.0: False)
+    monkeypatch.setattr(app_module.config, "home", lambda: tmp_path)
+    monkeypatch.setattr(sys, "argv", ["zrb-board", "-d"])
+
+    with app_module.daemon.only_one(app_module.daemon.lock_path(tmp_path)) as held:
+        assert held
+        app_module.main()
+
+    assert started == []
+    assert "Another" in capsys.readouterr().out
+
+
+def test_should_say_a_pid_belongs_to_another_process(tmp_path):
+    # The process is alive -- it is this one -- but it did not begin when the file says.
+    path = tmp_path / "board.pid"
+    path.write_text(f"{os.getpid()}\nbegan-long-ago\n", encoding="utf-8")
+    if daemon.started_at(os.getpid()) is None:
+        return  # this system reports no start time; there is nothing to compare
+    said = daemon.describe(path, "http://127.0.0.1:1/api/docs")
+    assert "reused" in said, said
+    assert "not running" in said, said
+
+
 def test_should_describe_a_board_that_is_not_there(tmp_path):
     said = daemon.describe(tmp_path / "board.pid", "http://127.0.0.1:1/api/docs")
     assert "not running" in said

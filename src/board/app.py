@@ -278,24 +278,32 @@ def background() -> None:
     The pid is written before the wait, so `stop` finds it even if the copy dies on the way
     up. The wait is only so that the command can say whether the board actually answered
     rather than leaving you to guess.
+
+    The answer is re-read inside the lock, not before it: two commands that ask "is it up"
+    at the same moment both hear "no", and both would start a server. The lock is what
+    turns that pair of reads into one answer.
     """
-    url = _board_url()
-    if daemon.answering(url):
-        print(f"Already serving at {url}: nothing started.")
-        return
     home = config.home()
     home.mkdir(parents=True, exist_ok=True)
-    log = daemon.log_path(home)
-    pid = daemon.detach([sys.executable, "-m", "board.app"], log)
-    daemon.write_pid(daemon.pid_path(home), pid)
-    for _ in range(50):
-        if daemon.answering(url):
-            print(f"Serving in the background as pid {pid}: {url}")
-            print(f"Log: {log}")
+    url = _board_url()
+    with daemon.only_one(daemon.lock_path(home)) as alone:
+        if not alone:
+            print("Another `zrb-board -d` is starting the board: nothing started.")
             return
-        if not daemon.running(pid):
-            break
-        time.sleep(0.1)
+        if daemon.answering(url):
+            print(f"Already serving at {url}: nothing started.")
+            return
+        log = daemon.log_path(home)
+        pid = daemon.detach([sys.executable, "-m", "board.app"], log)
+        daemon.write_pid(daemon.pid_path(home), pid)
+        for _ in range(50):
+            if daemon.answering(url):
+                print(f"Serving in the background as pid {pid}: {url}")
+                print(f"Log: {log}")
+                return
+            if not daemon.running(pid):
+                break
+            time.sleep(0.1)
     print(f"Started pid {pid}, but nothing answers at {url} yet. Log: {log}")
 
 

@@ -20,14 +20,72 @@ import subprocess
 import time
 import urllib.error
 import urllib.request
+from contextlib import contextmanager
 from pathlib import Path
+from typing import Iterator
 
 PID_NAME = "board.pid"
 LOG_NAME = "board.log"
+LOCK_NAME = "board.lock"
 
 
 def pid_path(home: Path) -> Path:
     return home / PID_NAME
+
+
+def lock_path(home: Path) -> Path:
+    return home / LOCK_NAME
+
+
+@contextmanager
+def only_one(path: Path) -> Iterator[bool]:
+    """Hold a lock while starting, so two `-d` cannot both spawn a server.
+
+    The check "is it answering?" is a read; two commands that read it at the same moment
+    both get "no" and both start one. This is the write that separates them. The lock is
+    advisory and held only for the start -- the answer says False rather than waiting, since
+    the other command is doing the same job.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "a+", encoding="utf-8") as handle:
+        if not _lock(handle):
+            yield False
+            return
+        try:
+            yield True
+        finally:
+            _unlock(handle)
+
+
+def _lock(handle) -> bool:
+    try:
+        if os.name == "nt":
+            import msvcrt
+
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        return False
+    return True
+
+
+def _unlock(handle) -> None:
+    try:
+        if os.name == "nt":
+            import msvcrt
+
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+    except OSError:
+        pass  # closing the file releases it on POSIX anyway
 
 
 def log_path(home: Path) -> Path:
@@ -65,13 +123,17 @@ def detach(command: list[str], log: Path) -> int:
 def running(pid: int) -> bool:
     """Whether *pid* names a live process.
 
-    Signal 0 does not deliver anything; it only asks the system whether it could. On POSIX
-    that is enough, and a permission error still means the process is there -- but an
-    exited process whose parent has not reaped it answers yes until it is collected, so
-    Linux's `/proc` is asked the second question.
+    Signal 0 does not deliver anything on POSIX; it only asks whether it could. Windows is
+    the exception that matters: `os.kill` there terminates the process whatever the number,
+    so asking "are you alive" that way would be answering it. `OpenProcess` asks instead.
+
+    An exited process whose parent has not reaped it answers signal 0 until it is collected,
+    so Linux's `/proc` is asked the second question.
     """
     if pid <= 0:
         return False
+    if os.name == "nt":
+        return _running_on_windows(pid)
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
@@ -81,6 +143,30 @@ def running(pid: int) -> bool:
     except OSError:
         return False
     return _not_a_zombie(pid)
+
+
+def _running_on_windows(pid: int) -> bool:
+    """Ask Windows whether a process is still running, without touching it.
+
+    `os.kill(pid, 0)` on Windows calls TerminateProcess with 0 -- it kills. `OpenProcess`
+    fails for a pid that is gone, and `GetExitCodeProcess` separates a live process from a
+    dead one whose object another handle is still holding open.
+    """
+    import ctypes
+
+    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+    STILL_ACTIVE = 259
+    kernel32 = ctypes.windll.kernel32
+    handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    if not handle:
+        return False
+    try:
+        code = ctypes.c_ulong()
+        if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+            return False
+        return code.value == STILL_ACTIVE
+    finally:
+        kernel32.CloseHandle(handle)
 
 
 def _not_a_zombie(pid: int) -> bool:
@@ -196,7 +282,7 @@ def stop(path: Path) -> str:
     except OSError as failure:
         return f"Could not stop pid {pid}: {failure}"
     for _ in range(100):
-        if not running(pid):
+        if not running(pid) or _collected(pid):
             break
         time.sleep(0.05)
     if running(pid):
@@ -205,10 +291,32 @@ def stop(path: Path) -> str:
     return f"Stopped pid {pid}."
 
 
+def _collected(pid: int) -> bool:
+    """Whether *pid* is a child of this process that has exited, and is now reaped.
+
+    Only a test has a board as its child, but there the wait would otherwise never end: on
+    macOS a zombie answers signal 0, and there is no `/proc` to notice. `waitpid` is the
+    question that settles it, and it can only be asked about our own children.
+    """
+    if os.name == "nt":
+        return False
+    try:
+        return bool(os.waitpid(pid, os.WNOHANG)[0])
+    except (ChildProcessError, OSError):
+        return False
+
+
 def describe(path: Path, url: str) -> str:
     """One sentence about whether the board is up, and how it was started."""
     pid = read_pid(path)
-    if pid is not None and running(pid):
+    identity = read_identity(path)
+    current = started_at(pid) if pid is not None else None
+    if pid is not None and identity and current and identity != current:
+        state = (
+            f"not running: pid {pid} in {path} began at {current}, not at {identity} -- "
+            "the pid was reused, so the file is stale"
+        )
+    elif pid is not None and running(pid):
         state = f"running as pid {pid}, from {path}"
     elif pid is not None:
         state = f"not running: pid {pid} in {path} is gone (stale pid file)"
