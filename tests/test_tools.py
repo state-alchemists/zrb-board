@@ -1,11 +1,34 @@
-"""The agent's tools: what is waiting, what a document says, and what a note takes."""
+"""The agent's tools: what is waiting, what a document says, and what a note takes.
+
+And the `purpose` each of them accepts without reading, which is what keeps a call that
+carries one -- every call a model makes -- from being refused as an extra argument.
+"""
 
 import sys
 from pathlib import Path
 
 import pytest
+from pydantic_ai import Tool
 
 from board import app, tools
+
+# The five, in the order they are registered, as `board/zrb_init.py` names them.
+TOOLS = (
+    tools.BoardState,
+    tools.BoardRead,
+    tools.BoardWrite,
+    tools.BoardNote,
+    tools.BoardResolveNote,
+)
+
+# The least a call can send and be a real call, beside the `purpose` under test.
+MINIMAL_CALLS = (
+    (tools.BoardState, {}),
+    (tools.BoardRead, {"name": "0001-q"}),
+    (tools.BoardWrite, {"name": "0001-q", "markdown": "# Q\n", "rev": "abc"}),
+    (tools.BoardNote, {"name": "0001-q", "quote": "First paragraph", "note": "a note"}),
+    (tools.BoardResolveNote, {"name": "0001-q", "note_id": "a1"}),
+)
 
 
 def test_ink_is_not_a_note():
@@ -107,3 +130,42 @@ def test_init_path_names_the_file_shipped_beside_the_server(monkeypatch, capsys)
     app.main()
     printed = Path(capsys.readouterr().out.strip())
     assert printed.is_file() and printed.name == "zrb_init.py"
+
+
+def test_every_tool_offers_the_purpose_a_model_always_sends():
+    # zrb's own tools ask for a `purpose` on every call, so a model writes one on every
+    # call, board tools included. The schema is what the model reads and what its
+    # arguments are validated against, so the contract is checked there -- in the shape
+    # pydantic-ai builds from the signature, not in the signature alone.
+    for tool in TOOLS:
+        properties = Tool(tool).function_schema.json_schema["properties"]
+        assert properties["purpose"]["type"] == "string", tool.__name__
+        # Optional: a model that says nothing is not punished either way, and a python
+        # caller (a test, another tool) may leave it out.
+        assert properties["purpose"]["default"] == "", tool.__name__
+
+
+def test_a_call_that_says_its_purpose_is_not_refused():
+    # The arguments of a call, put through the validator that runs before the body:
+    # `extra_forbidden` on `purpose` was the whole defect, and it fired on every tool.
+    for tool, arguments in MINIMAL_CALLS:
+        validated = Tool(tool).function_schema.validator.validate_python(
+            {**arguments, "purpose": "seeing what the board holds"}
+        )
+        assert validated["purpose"] == "seeing what the board holds", tool.__name__
+
+
+def test_the_purpose_is_sent_nowhere(monkeypatch):
+    # Accepted, then dropped: it is a line for the narrator, which reads it from the
+    # call's arguments itself, and not an argument to any request the board receives.
+    sent = []
+
+    def record(method, path, payload=None):
+        sent.append(payload)
+        return {"id": "a1", "block": "b_1"}
+
+    monkeypatch.setattr(tools, "_json", record)
+    tools.BoardNote("0001-q", "foo", "the row", purpose="asking about foo")
+    assert sent == [
+        {"quote": "foo", "note": "the row", "author": tools.NOTE_AUTHOR},
+    ]

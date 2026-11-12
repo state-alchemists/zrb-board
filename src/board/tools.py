@@ -10,6 +10,14 @@ zrb; the server (`board.app`) runs without zrb ever being installed.
 
 `BOARD_URL` overrides the address (the one `zrb-board` binds by default); `BOARD_AUTHOR`
 signs a note, `agent` unless it is set.
+
+Every tool here also takes a `purpose` and ignores it. zrb's own tools ask the model to say
+what each call is *for*, so it says it on every call, board tools included; a tool that does
+not declare the argument has the call refused as an extra one -- `extra_forbidden`, before
+the body runs -- and the board is never reached. Declaring it costs nothing, because no tool
+reads it: zrb's narrator takes it from the call's arguments, which is all it was ever for.
+The wording lives here rather than in an import of zrb's own `Purpose`, so the server keeps
+running with zrb uninstalled.
 """
 
 import json
@@ -175,11 +183,15 @@ def _marks_waiting(inbox: list[str]) -> list[str]:
     return lines or ["(no marks waiting)"]
 
 
-def BoardState() -> str:
+def BoardState(purpose: str = "") -> str:
     """Look at the board: the marks waiting, then every document on it.
 
     Read this first whenever the user mentions the board -- the document names it prints
     are what the other board tools take.
+
+    Args:
+      purpose: One short phrase saying what this call is for, as zrb asks of every tool.
+        Nothing here reads it: it is declared so a call that fills it is not refused.
     """
     inbox = [
         line for line in _request("GET", "/api/inbox")[1].splitlines() if line.strip()
@@ -204,7 +216,7 @@ def BoardState() -> str:
     return "\n".join(lines)
 
 
-def BoardRead(name: str, source: bool = False) -> str:
+def BoardRead(name: str, source: bool = False, purpose: str = "") -> str:
     """Read one document: the readable view, or the document's own markdown.
 
     By default it is the view: the title, the revision, and each note in the margin
@@ -218,13 +230,15 @@ def BoardRead(name: str, source: bool = False) -> str:
         around it: that is the text BoardWrite takes back. Its revision is the one
         BoardState prints for the document, or the first line of the default view. Use
         the source to write, and the view to think.
+      purpose: One short phrase saying what this call is for, as zrb asks of every tool.
+        Nothing here reads it: it is declared so a call that fills it is not refused.
     """
     if not source:
         return _request("GET", _document_path(name, "/state.md"))[1]
     return _json("GET", _document_path(name))["markdown"]
 
 
-def BoardWrite(name: str, markdown: str, rev: str) -> str:
+def BoardWrite(name: str, markdown: str, rev: str, purpose: str = "") -> str:
     """Replace a document's markdown, stating the revision that was read.
 
     The whole document is replaced, so send the full text rather than a fragment. If the
@@ -235,6 +249,8 @@ def BoardWrite(name: str, markdown: str, rev: str) -> str:
       name: A document name, as BoardState prints it.
       markdown: The complete new text of the document.
       rev: The revision BoardRead printed, e.g. `f5d1e63f1a70`.
+      purpose: One short phrase saying what this call is for, as zrb asks of every tool.
+        Nothing here reads it: it is declared so a call that fills it is not refused.
     """
     if _is_the_read_view(markdown, name, rev):
         raise RuntimeError(
@@ -260,7 +276,7 @@ def BoardWrite(name: str, markdown: str, rev: str) -> str:
     return f"Written. {name} is now at rev {written['rev']}, updated {written['updated']}."
 
 
-def BoardNote(name: str, quote: str, note: str) -> str:
+def BoardNote(name: str, quote: str, note: str, purpose: str = "") -> str:
     """Leave a note on a quoted passage, in the margin beside it.
 
     Use it for a remark about one paragraph -- a question, a correction, an objection --
@@ -273,6 +289,8 @@ def BoardNote(name: str, quote: str, note: str) -> str:
         hashes or a line break in the middle do not stop it. It has to be words one block
         holds whole; a quote that runs over two paragraphs is refused, not shortened.
       note: What to say about them.
+      purpose: One short phrase saying what this call is for, as zrb asks of every tool.
+        Nothing here reads it: it is declared so a call that fills it is not refused.
     """
     document = _json(
         "POST",
@@ -282,12 +300,14 @@ def BoardNote(name: str, quote: str, note: str) -> str:
     return f"Noted on block {document['block']}: {note}"
 
 
-def BoardResolveNote(name: str, note_id: str) -> str:
+def BoardResolveNote(name: str, note_id: str, purpose: str = "") -> str:
     """Close a note that has been dealt with, by the id BoardRead shows.
 
     Args:
       name: A document name, as BoardState prints it.
       note_id: The note's id, e.g. `a1`.
+      purpose: One short phrase saying what this call is for, as zrb asks of every tool.
+        Nothing here reads it: it is declared so a call that fills it is not refused.
     """
     document = _json("GET", _document_path(name))
     found = next(
