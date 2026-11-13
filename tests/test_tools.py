@@ -54,6 +54,17 @@ def test_marks_fold_per_document_and_keep_the_newest_time():
     assert tools._marks_waiting([]) == ["(no marks waiting)"]
 
 
+def test_a_mark_that_carries_a_passage_still_folds_to_its_document():
+    # Two passages marked on one page are two marks on one document, not two documents.
+    inbox = [
+        "- 2026-11-08T09:02:26+07:00 — board: 0001-one — the first passage",
+        "- 2026-11-08T09:04:34+07:00 — board: 0001-one — the second passage",
+    ]
+    assert tools._marks_waiting(inbox) == [
+        "- 0001-one ×2 — newest 2026-11-08T09:04:34+07:00"
+    ]
+
+
 def test_a_conflict_is_recognised_even_when_the_document_is_empty():
     # A stale write against an empty document must still come back as the merge response,
     # so the body's keys decide, not its values.
@@ -206,5 +217,8 @@ def test_retiring_marks_says_how_many_went(monkeypatch):
     # One is "1 mark"; three is "3 marks". The count is the whole answer to the call.
     assert "Retired 3 marks" in tools.BoardRetireMarks("2026-11-08T12:44:56+07:00")
     assert sent == [
-        ("POST", "/api/inbox/retire", {"upto": "2026-11-08T12:44:56+07:00"})
+        ("POST", "/api/inbox/retire", {"upto": "2026-11-08T12:44:56+07:00", "id": ""})
     ]
+    tools.BoardRetireMarks(id="a1b2c3d4")
+    assert sent[-1] == ("POST", "/api/inbox/retire", {"upto": "", "id": "a1b2c3d4"})
+    assert sent[-1] == ("POST", "/api/inbox/retire", {"upto": "", "id": "a1b2c3d4"})

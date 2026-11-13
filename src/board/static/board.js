@@ -638,11 +638,17 @@ async function submitCompose() {
 }
 
 async function notify() {
+  // The passage is what lets the answer come back as a note beside your words instead of a
+  // sentence in a transcript you may not be looking at. No passage marked, no quotation —
+  // and then the nudge answers in the chat rather than inventing one.
+  const selection = window.getSelection();
+  const quote = selection ? selection.toString().trim() : '';
+  const text = quote ? `board: ${state.name} — ${quote}` : `board: ${state.name}`;
   await request('/api/inbox', {
     method: 'POST',
-    body: JSON.stringify({ text: `board: ${state.name}` }),
+    body: JSON.stringify({ text }),
   });
-  toast('marked — read before my next message');
+  toast(quote ? 'marked this passage' : 'marked — read before my next message');
 }
 
 /* --- wiring ------------------------------------------------------------- */

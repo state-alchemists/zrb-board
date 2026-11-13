@@ -160,14 +160,43 @@ pixels from the finger.
 
 ## 7. The nudge is a trigger, not a queue
 
-The "mark for next message" button appends a line to `.board/inbox.md` and nothing
-more — a browser cannot make an agent take a turn.
+The "mark for next message" button appends a line to `.board/inbox.md` — naming the
+document, and carrying the passage the mark was made on — and nothing more: a browser
+cannot make an agent take a turn.
 
-The mechanism that can is zrb's trigger: a generator registered on the chat
-task that yields a turn when there is something to say. zrb-avatar already
-runs its nudge this way. The board's version will poll the inbox, keep a
-ledger of consumed lines so a restart cannot re-fire, and default to **off** —
-a program that starts turns on your behalf should be one you switched on.
+The mechanism that can is zrb's trigger, and it is built. `board/nudge.py` yields one turn
+per unread mark, and `board/zrb_init.py` registers it on the chat task beside the seven
+tools. Five properties, each with a reason:
+
+- **Off unless `ZRB_BOARD_NUDGE` is set.** A program that starts turns on your behalf should
+  be one you switched on. The switch is read at every look; the trigger is registered once,
+  when the chat starts, so turning it on is a new chat.
+- **Nothing is claimed while marking is going on.** A mark is a selection made a second ago
+  and possibly the first of three, so the queue waits until no new mark has arrived for
+  `ZRB_BOARD_NUDGE_SETTLE` seconds — thirty by default, measured from the newest mark rather
+  than from the one about to be answered. Answering the first of a run while the second is
+  being dragged is the interruption the feature exists to avoid.
+- **One turn per mark, claimed one at a time.** A ledger of claimed ids in
+  `.board/nudge.json`, written immediately before *that* mark's turn and never for a batch:
+  claiming the inbox up front would lose every mark after the first if the chat stopped
+  between turns — still in the inbox, already counted as answered. The id is a hash of the
+  mark's own line (`store.mark_id`), because a stamp is good to the second and two marks made
+  together share one; retiring an id leaves the mark beside it.
+- **A claim is a lease, not a tombstone.** Each claim carries the time it was made and stops
+  counting after ten minutes, and claims about lines no longer in the inbox are dropped. A
+  claim written for a turn that never ran — the chat was killed between the claim and the
+  yield — would otherwise hide that mark from every later chat, still in the inbox and
+  skipped for ever. A repeat is the cheaper failure. The claim is taken under
+  `daemon.only_one`, the same advisory lock that stops two `-d` starting two servers: two
+  chats on one board are two trigger loops, and a read-modify-write without a lock answers
+  the same mark twice. A chat that finds the lock held looks again rather than waiting.
+- **The inbox is read as a file, not over HTTP.** The trigger runs on the machine that holds
+  the board, so a stopped server does not silence a mark.
+
+Where the answer lands follows from what the mark carries. A passage is answered in the
+margin, anchored by that quotation, through `BoardNote`; a mark made with nothing selected
+has no quotation to anchor to, and is answered in the chat, which the trigger's own words
+say rather than leaving the agent to invent one.
 
 *Rejected:* pushing a message into a running web-chat session. It works, but
 only if a web session exists and the board knows its id and token; the terminal

@@ -108,6 +108,46 @@ def _mark_stamp(line: str) -> datetime | None:
     return _stamp(line.strip().removeprefix("- ").partition(" — ")[0])
 
 
+# Two presses of one button inside this many seconds are one mark. A page can be slow enough
+# that somebody presses twice, and the queue cannot tell the two lines apart anyway: same
+# words, same second, one identity.
+REPEAT_SECONDS = 2.0
+
+
+def mark_id(line: str) -> str:
+    """A short identity for one inbox entry, derived from the line itself.
+
+    The stamp is good to the second, so two marks made inside one second carry the same one
+    — and retiring or consuming by stamp would then take both, losing a passage somebody
+    chose. What makes two marks different is their words, so the line's own text names it:
+    nothing extra is written into the inbox for a person to read around, and nothing has to
+    stay in step with the text, because it is the text.
+
+    Sixteen hex characters — sixty-four bits — rather than the eight the first version kept:
+    an id is short enough to read in a prompt either way, and the longer one makes an
+    accidental collision something that cannot happen to a queue this size.
+    """
+    return hashlib.sha256(line.strip().encode("utf-8")).hexdigest()[:16]
+
+
+def _repeats_newest(inbox: str, said: str, stamp: str) -> bool:
+    """Whether the newest mark in *inbox* already says *said*, and said it moments ago.
+
+    Only the newest: a passage marked again an hour later is a second intention, and the
+    same passage marked twice by one slow press is not. The window is what separates them.
+    """
+    lines = [line for line in inbox.splitlines() if line.strip()]
+    if not lines:
+        return False
+    newest = lines[-1].strip().removeprefix("- ").partition(" — ")[2]
+    if newest != said:
+        return False
+    made, now = _mark_stamp(lines[-1]), _stamp(stamp)
+    if made is None or now is None:
+        return False
+    return (now - made).total_seconds() <= REPEAT_SECONDS
+
+
 def _next_id(annotations: list[dict]) -> str:
     highest = 0
     for annotation in annotations:
@@ -339,22 +379,37 @@ class Store:
         second half that looks like a mark could be retired out from under the first.
         The line breaks go and nothing else does: the words are left as they were
         written, spaces and tabs included.
+
+        The same mark twice in a couple of seconds is one mark. A second press on a slow
+        page is an accident, and two lines of identical words made in the same second cannot
+        be told apart downstream anyway — they carry one identity, so a queue holding both
+        would count two marks and answer one.
         """
         said = " ".join(text.splitlines()).strip() or "read the board"
         stamp = datetime.now().astimezone().isoformat(timespec="seconds")
         entry = f"- {stamp} — {said}\n"
         with self._lock:
             existing = self.inbox()
+            if _repeats_newest(existing, said, stamp):
+                return
             self._atomic_write(self.inbox_path, existing + entry)
 
-    def retire_marks(self, upto: str = "") -> int:
-        """Retire the marks up to *upto*, or every mark when it is empty.
+    def retire_marks(self, upto: str = "", identity: str = "") -> int:
+        """Retire one mark by its id, the marks up to *upto*, or every mark when both are empty.
 
         `notify` only ever appends, so a folder nothing retires holds every mark ever
         made, and a document's "×8" means eight marks made rather than eight waiting.
         Retiring is a separate, explicit act and not something a read does: reading is
         not acting, and a mark cleared before its work is done is a reminder thrown
         away.
+
+        The two ways in are not the same act. A watermark takes every mark at or before a
+        stamp, which is what "I have dealt with these" means and what `BoardState` prints.
+        An *identity* takes the entries whose words it names — what the trigger needs, since
+        it answers one mark per turn and must not sweep away older ones nobody has read yet.
+        Usually that is one line, because `notify` refuses to write the same mark twice in a
+        row; two identical lines carry one identity and go together, so answering one cannot
+        leave the other behind for ever. Two marks can share a stamp; they cannot share a line.
 
         A line whose stamp cannot be read is kept. A stamp that cannot be read at all
         is refused, because the alternative is a typo retiring the whole queue.
@@ -364,12 +419,21 @@ class Store:
             cutoff = _stamp(upto)
             if cutoff is None:
                 raise UnknownStamp(upto)
+        wanted = identity.strip().lower()
         with self._lock:
             kept: list[str] = []
             retired = 0
             for line in self.inbox().splitlines(keepends=True):
                 stamp = _mark_stamp(line)
-                if stamp is not None and (cutoff is None or stamp <= cutoff):
+                if stamp is None:
+                    kept.append(line)
+                    continue
+                take = (
+                    mark_id(line) == wanted
+                    if wanted
+                    else cutoff is None or stamp <= cutoff
+                )
+                if take:
                     retired += 1
                     continue
                 kept.append(line)

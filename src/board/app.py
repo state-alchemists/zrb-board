@@ -71,6 +71,7 @@ class InboxBody(BaseModel):
 
 class RetireBody(BaseModel):
     upto: str = ""
+    id: str = ""
 
 
 class NoteBody(BaseModel):
@@ -319,14 +320,18 @@ def _register_routes(app: FastAPI, store: Store) -> None:
 
     @app.post("/api/inbox/retire")
     def retire_markers(body: RetireBody = RetireBody()) -> dict:
-        """Retire the marks that have been dealt with, up to a stamp or all of them.
+        """Retire the marks that have been dealt with: one by id, up to a stamp, or all.
 
         A mark is a queue entry nothing dequeued, so "×8" on a document meant eight
         marks ever made. Retiring is its own request because reading the inbox is not
         answering it: a mark cleared before its work is done is a reminder thrown away.
+
+        An `id` names one entry and is what the trigger sends, because a turn answers one
+        mark and must not retire marks nobody has read. `upto` is the watermark a person
+        means by "these are dealt with".
         """
         try:
-            return {"retired": store.retire_marks(body.upto)}
+            return {"retired": store.retire_marks(body.upto, body.id)}
         except UnknownStamp as refusal:
             raise HTTPException(
                 status_code=422,
