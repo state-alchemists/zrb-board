@@ -49,13 +49,39 @@ button:hover {
   background: #f2eee6;
 }
 
+/* One measure for the words, shared by a document and the index, so a paragraph is
+   the same width wherever the reader meets it and the page never drifts wider than
+   reading wants. The rail is sized to a note card and nothing more. */
+:root {
+  --measure: 50rem;
+  --rail: 20rem;
+  --gutter: 2.5rem;
+}
+
 #layout {
   display: grid;
-  grid-template-columns: minmax(0, 44rem) 22rem;
-  gap: 3rem;
+  /* The article takes what is left of the page, so a narrower window narrows the
+     words a little rather than starving the rail; the max-width is what stops it
+     growing past the measure on a wide one. */
+  grid-template-columns: minmax(0, 1fr) var(--rail);
+  gap: var(--gutter);
+  max-width: calc(var(--measure) + var(--rail) + var(--gutter));
+  margin-inline: auto;
   padding: 2.5rem 1.5rem 8rem;
-  justify-content: center;
   align-items: start;
+}
+
+/* Below this the two columns no longer fit side by side without squeezing the words
+   to a sliver, so the notes go under the document as a list instead. */
+@media (max-width: 60rem) {
+  #layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  #rail .card {
+    position: static;
+    margin-bottom: 0.75rem;
+  }
 }
 
 #article {
@@ -351,7 +377,7 @@ body.editing #editor {
 }
 
 #docs {
-  max-width: 44rem;
+  max-width: var(--measure);
   margin: 0 auto;
   padding: 2.5rem 1.5rem;
 }
