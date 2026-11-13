@@ -12,13 +12,15 @@ from pydantic_ai import Tool
 
 from board import app, tools
 
-# The five, in the order they are registered, as `board/zrb_init.py` names them.
+# The seven, in the order they are registered, as `board/zrb_init.py` names them.
 TOOLS = (
     tools.BoardState,
     tools.BoardRead,
     tools.BoardWrite,
+    tools.BoardCreate,
     tools.BoardNote,
     tools.BoardResolveNote,
+    tools.BoardRetireMarks,
 )
 
 # The least a call can send and be a real call, beside the `purpose` under test.
@@ -26,8 +28,10 @@ MINIMAL_CALLS = (
     (tools.BoardState, {}),
     (tools.BoardRead, {"name": "0001-q"}),
     (tools.BoardWrite, {"name": "0001-q", "markdown": "# Q\n", "rev": "abc"}),
+    (tools.BoardCreate, {"name": "0013-new", "markdown": "# New\n"}),
     (tools.BoardNote, {"name": "0001-q", "quote": "First paragraph", "note": "a note"}),
     (tools.BoardResolveNote, {"name": "0001-q", "note_id": "a1"}),
+    (tools.BoardRetireMarks, {}),
 )
 
 
@@ -168,4 +172,39 @@ def test_the_purpose_is_sent_nowhere(monkeypatch):
     tools.BoardNote("0001-q", "foo", "the row", purpose="asking about foo")
     assert sent == [
         {"quote": "foo", "note": "the row", "author": tools.NOTE_AUTHOR},
+    ]
+
+
+def test_a_new_document_is_one_request_to_the_board(monkeypatch):
+    sent = []
+
+    def fake_json(method, path, payload=None):
+        sent.append((method, path, payload))
+        return {"rev": "abc", "updated": "2026-11-13T12:00:00"}
+
+    monkeypatch.setattr(tools, "_json", fake_json)
+    assert "abc" in tools.BoardCreate("0013-new", "# New\n\ntext\n")
+    assert sent == [
+        ("POST", "/api/docs", {"name": "0013-new", "markdown": "# New\n\ntext\n"})
+    ]
+
+
+def test_a_document_with_no_text_is_not_created(monkeypatch):
+    monkeypatch.setattr(tools, "_json", lambda *args, **kwargs: pytest.fail("called"))
+    with pytest.raises(RuntimeError, match="nothing created"):
+        tools.BoardCreate("0013-new", "  \n")
+
+
+def test_retiring_marks_says_how_many_went(monkeypatch):
+    sent = []
+
+    def fake_json(method, path, payload=None):
+        sent.append((method, path, payload))
+        return {"retired": 3}
+
+    monkeypatch.setattr(tools, "_json", fake_json)
+    # One is "1 mark"; three is "3 marks". The count is the whole answer to the call.
+    assert "Retired 3 marks" in tools.BoardRetireMarks("2026-11-08T12:44:56+07:00")
+    assert sent == [
+        ("POST", "/api/inbox/retire", {"upto": "2026-11-08T12:44:56+07:00"})
     ]

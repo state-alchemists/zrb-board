@@ -3,8 +3,10 @@ import pytest
 from board.store import (
     DocExists,
     DocNotFound,
+    HasOpenNotes,
     InvalidName,
     RevConflict,
+    UnknownStamp,
     content_rev,
 )
 
@@ -211,3 +213,62 @@ def test_should_take_a_transaction_inside_a_transaction(store):
         store.set_ink("0001-question", "b_1", "text", [{"points": [[1, 2]]}], author="go")
         store.write("0001-question", "# Q\n\nchanged\n", doc.rev)
     assert [one["kind"] for one in store.annotations("0001-question")] == ["ink"]
+
+
+def test_should_remove_a_document_and_its_annotations_together(store):
+    store.create("0001-question", "# Q\n\ntext\n")
+    note = store.add_annotation("0001-question", _note("text"))
+    store.set_resolved("0001-question", note["id"], True)
+
+    assert store.remove("0001-question") == {"name": "0001-question", "removed": True}
+    assert not (store.docs_dir / "0001-question.md").exists()
+    assert not (store.meta_dir / "0001-question.annotations.json").exists()
+
+
+def test_should_refuse_to_remove_a_document_that_still_holds_an_open_note(store):
+    # Someone asked a question about this text and has not been answered; a removal
+    # that took the note with it would answer by making the question unaskable.
+    store.create("0001-question", "# Q\n\ntext\n")
+    store.add_annotation("0001-question", _note("text"))
+    with pytest.raises(HasOpenNotes, match="1 open note"):
+        store.remove("0001-question")
+    assert store.read("0001-question").markdown == "# Q\n\ntext\n"
+
+
+def test_should_let_ink_go_with_its_document(store):
+    # A drawing is not a question: it does not hold the page back.
+    store.create("0001-question", "# Q\n\ntext\n")
+    store.set_ink("0001-question", "b_1", "text", [_stroke(0.0)])
+    store.remove("0001-question")
+    assert not (store.docs_dir / "0001-question.md").exists()
+
+
+def test_should_refuse_to_remove_a_document_that_is_not_there(store):
+    with pytest.raises(DocNotFound):
+        store.remove("missing")
+
+
+def test_should_retire_the_marks_up_to_a_stamp_and_leave_the_rest(store):
+    (store.meta_dir / "inbox.md").write_text(
+        "- 2026-11-08T09:00:00+07:00 — board: 0001-one\n"
+        "- 2026-11-08T10:00:00+07:00 — board: 0001-one\n"
+        "- 2026-11-08T11:00:00+07:00 — board: 0002-two\n",
+        encoding="utf-8",
+    )
+    assert store.retire_marks("2026-11-08T10:00:00+07:00") == 2
+    assert store.inbox() == "- 2026-11-08T11:00:00+07:00 — board: 0002-two\n"
+    assert store.retire_marks() == 1
+    assert store.inbox() == ""
+
+
+def test_should_refuse_a_stamp_it_cannot_read_rather_than_empty_the_queue(store):
+    store.notify("board: 0001-one")
+    with pytest.raises(UnknownStamp):
+        store.retire_marks("last tuesday")
+    assert "board: 0001-one" in store.inbox()
+
+
+def test_should_keep_a_mark_whose_own_stamp_cannot_be_read(store):
+    (store.meta_dir / "inbox.md").write_text("- no stamp — board: 0001-one\n", encoding="utf-8")
+    assert store.retire_marks() == 0
+    assert "board: 0001-one" in store.inbox()

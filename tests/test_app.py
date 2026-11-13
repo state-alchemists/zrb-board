@@ -167,3 +167,69 @@ def test_should_refuse_a_note_whose_document_moved_while_it_was_placed(
     assert refused.status_code == 409
     assert "changed" in refused.json()["detail"]
     assert store.annotations("0001-question") == []
+
+
+def test_should_create_a_document_through_the_board(client):
+    # The route `store.create` was written for: before it, a document could only be
+    # added by writing the file into docs/ by hand.
+    created = client.post(
+        "/api/docs", json={"name": "0013-new", "markdown": "# New\n\ntext\n"}
+    )
+    assert created.status_code == 201
+    assert created.json()["rev"]
+    assert client.get("/api/docs/0013-new").json()["title"] == "New"
+
+
+def test_should_refuse_a_second_create_and_leave_the_first_document_alone(client):
+    # The failure mode a create route has to rule out is create-then-overwrite: a name
+    # that is taken is a refusal, never a fresh start over somebody's page.
+    client.post("/api/docs", json={"name": "0013-new", "markdown": "# New\n\nfirst\n"})
+    again = client.post(
+        "/api/docs", json={"name": "0013-new", "markdown": "# New\n\nsecond\n"}
+    )
+    assert again.status_code == 409
+    assert "already here" in again.json()["detail"]
+    assert client.get("/api/docs/0013-new").json()["markdown"] == "# New\n\nfirst\n"
+
+
+def test_should_refuse_a_name_that_could_leave_the_docs_directory(client, root):
+    refused = client.post("/api/docs", json={"name": "../outside", "markdown": "# N\n"})
+    assert refused.status_code == 422
+    assert not (root.parent / "outside.md").exists()
+    assert list((root / "docs").iterdir()) == []
+
+
+def test_should_remove_a_document_once_its_notes_are_closed(client, store):
+    store.create("0001-question", "# Q\n\ntext\n")
+    note = _note(client, "0001-question").json()
+
+    refused = client.delete("/api/docs/0001-question")
+    assert refused.status_code == 409
+    assert "open note" in refused.json()["detail"]
+    assert client.get("/api/docs/0001-question").status_code == 200
+
+    client.post(f"/api/docs/0001-question/annotations/{note['id']}/resolve")
+    assert client.delete("/api/docs/0001-question").status_code == 200
+    assert client.get("/api/docs/0001-question").status_code == 404
+    # The notes go with the document: a meta file left behind is the orphan in .board/.
+    assert not (store.meta_dir / "0001-question.annotations.json").exists()
+    assert client.get("/api/docs").json()["docs"] == []
+
+
+def test_should_answer_404_when_removing_a_document_that_is_not_there(client):
+    assert client.delete("/api/docs/missing").status_code == 404
+
+
+def test_should_retire_every_mark_when_no_stamp_is_named(client):
+    for text in ["board: 0001-one", "board: 0002-two"]:
+        client.post("/api/inbox", json={"text": text})
+    assert client.post("/api/inbox/retire").json() == {"retired": 2}
+    assert client.get("/api/inbox").text == ""
+    assert client.post("/api/inbox/retire").json() == {"retired": 0}
+
+
+def test_should_refuse_a_stamp_it_cannot_read_rather_than_empty_the_queue(client):
+    client.post("/api/inbox", json={"text": "board: 0001-one"})
+    refused = client.post("/api/inbox/retire", json={"upto": "yesterday"})
+    assert refused.status_code == 422
+    assert "board: 0001-one" in client.get("/api/inbox").text
