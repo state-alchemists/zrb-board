@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "zrb-board"
-version = "0.2.3"
+version = "0.2.4"
 description = "A turn-based markdown board with annotated margins, for a human and a coding agent"
 readme = "README.md"
 # The same licence zrb itself declares, and a file to go with it: the identifier alone
