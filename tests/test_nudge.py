@@ -293,3 +293,18 @@ def test_the_ledger_is_written_under_a_name_only_this_chat_uses(meta):
     # replace it from under each other.
     temporary = nudge._temporary(meta / nudge.LEDGER_NAME)
     assert str(os.getpid()) in temporary.name
+
+
+def test_a_mark_retired_between_the_claim_and_the_turn_gets_no_turn(meta, monkeypatch):
+    # The retire route can land in the gap between claiming a mark and yielding its turn.
+    # A turn then would answer work somebody just cleared.
+    write_inbox(meta, MARK)
+    claim = nudge.next_unread_mark
+
+    def claim_then_retire(m, settle=None):
+        mark = claim(m, settle)
+        write_inbox(m)  # BoardRetireMarks took the line away while the turn was starting
+        return mark
+
+    monkeypatch.setattr(nudge, "next_unread_mark", claim_then_retire)
+    assert list(nudge._claim_in_order(meta, enabled=lambda: True)) == []

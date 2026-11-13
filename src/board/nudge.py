@@ -280,4 +280,9 @@ def _claim_in_order(meta: Path, enabled=config.nudge_enabled, settle: float | No
             return  # no board folder yet is a wait, not a failure
         if mark is None:
             return
+        if mark.id not in {other.id for other in read_inbox_marks(meta)}:
+            # Retired between the claim and this line: `BoardRetireMarks` can land in that
+            # gap, and a turn for a mark somebody has just cleared would answer work they
+            # explicitly took back. The claim dies with the line, so nothing is owed.
+            return
         yield mark
