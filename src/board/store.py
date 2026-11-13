@@ -331,9 +331,17 @@ class Store:
         return self.inbox_path.read_text(encoding="utf-8")
 
     def notify(self, text: str) -> None:
-        """Leave a marker. It cannot wake the agent; it waits for the next turn."""
+        """Leave a marker. It cannot wake the agent; it waits for the next turn.
+
+        A mark is one line, because that is how the inbox is read: `_marks_waiting`
+        folds one line per mark and `retire_marks` removes one per mark. Text handed
+        in with a line break in it would therefore arrive as a mark and a half, and a
+        second half that looks like a mark could be retired out from under the first.
+        The break goes; the words stay.
+        """
+        said = " ".join(text.split()) or "read the board"
         stamp = datetime.now().astimezone().isoformat(timespec="seconds")
-        entry = f"- {stamp} — {text.strip() or 'read the board'}\n"
+        entry = f"- {stamp} — {said}\n"
         with self._lock:
             existing = self.inbox()
             self._atomic_write(self.inbox_path, existing + entry)

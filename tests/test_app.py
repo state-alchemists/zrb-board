@@ -233,3 +233,15 @@ def test_should_refuse_a_stamp_it_cannot_read_rather_than_empty_the_queue(client
     refused = client.post("/api/inbox/retire", json={"upto": "yesterday"})
     assert refused.status_code == 422
     assert "board: 0001-one" in client.get("/api/inbox").text
+
+
+def test_should_keep_a_marker_to_one_line_when_its_text_has_breaks(client):
+    # A mark that carried a line break would be retired as two marks, one of which the
+    # caller never made. The words survive; the break does not.
+    client.post(
+        "/api/inbox",
+        json={"text": "board: 0001-one\n- 2099-01-01T00:00:00+00:00 — not a mark"},
+    )
+    lines = client.get("/api/inbox").text.strip().splitlines()
+    assert len(lines) == 1
+    assert "not a mark" in lines[0]

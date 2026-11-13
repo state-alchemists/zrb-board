@@ -272,3 +272,13 @@ def test_should_keep_a_mark_whose_own_stamp_cannot_be_read(store):
     (store.meta_dir / "inbox.md").write_text("- no stamp — board: 0001-one\n", encoding="utf-8")
     assert store.retire_marks() == 0
     assert "board: 0001-one" in store.inbox()
+
+
+def test_should_keep_a_mark_to_one_line_however_its_text_is_written(store):
+    # The inbox is read one line per mark and retired one line per mark, so a mark
+    # whose own text carries a line break would be two marks -- and the half that looks
+    # like one could be retired out from under the other.
+    store.notify("board: 0001-one\n- 2099-01-01T00:00:00+00:00 — keep this text")
+    assert len(store.inbox().strip().splitlines()) == 1
+    assert store.retire_marks() == 1
+    assert store.inbox() == ""
