@@ -217,5 +217,8 @@ def test_retiring_marks_says_how_many_went(monkeypatch):
     # One is "1 mark"; three is "3 marks". The count is the whole answer to the call.
     assert "Retired 3 marks" in tools.BoardRetireMarks("2026-11-08T12:44:56+07:00")
     assert sent == [
-        ("POST", "/api/inbox/retire", {"upto": "2026-11-08T12:44:56+07:00"})
+        ("POST", "/api/inbox/retire", {"upto": "2026-11-08T12:44:56+07:00", "id": ""})
     ]
+    tools.BoardRetireMarks(id="a1b2c3d4")
+    assert sent[-1] == ("POST", "/api/inbox/retire", {"upto": "", "id": "a1b2c3d4"})
+    assert sent[-1] == ("POST", "/api/inbox/retire", {"upto": "", "id": "a1b2c3d4"})

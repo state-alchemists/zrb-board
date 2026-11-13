@@ -1,3 +1,6 @@
+from board.store import mark_id
+
+
 def _note(client, name, quote="text", note="a note"):
     return client.post(
         f"/api/docs/{name}/annotations",
@@ -232,6 +235,27 @@ def test_should_refuse_a_stamp_it_cannot_read_rather_than_empty_the_queue(client
     client.post("/api/inbox", json={"text": "board: 0001-one"})
     refused = client.post("/api/inbox/retire", json={"upto": "yesterday"})
     assert refused.status_code == 422
+    assert "board: 0001-one" in client.get("/api/inbox").text
+
+
+def test_should_retire_one_mark_by_its_id_and_leave_its_neighbour(client):
+    # One turn answers one mark, so retiring by id must not take a mark made beside it --
+    # two marks made in the same second share a stamp, and `upto` would sweep both away.
+    for text in ["board: 0001-one — the first passage", "board: 0001-one — the second passage"]:
+        client.post("/api/inbox", json={"text": text})
+    lines = client.get("/api/inbox").text.strip().splitlines()
+    assert len(lines) == 2
+    assert client.post("/api/inbox/retire", json={"id": mark_id(lines[0])}).json() == {
+        "retired": 1
+    }
+    left = client.get("/api/inbox").text.strip().splitlines()
+    assert len(left) == 1
+    assert "second passage" in left[0]
+
+
+def test_should_retire_nothing_for_an_id_no_mark_carries(client):
+    client.post("/api/inbox", json={"text": "board: 0001-one"})
+    assert client.post("/api/inbox/retire", json={"id": "deadbeef"}).json() == {"retired": 0}
     assert "board: 0001-one" in client.get("/api/inbox").text
 
 

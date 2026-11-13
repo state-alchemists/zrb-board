@@ -108,6 +108,18 @@ def _mark_stamp(line: str) -> datetime | None:
     return _stamp(line.strip().removeprefix("- ").partition(" — ")[0])
 
 
+def mark_id(line: str) -> str:
+    """A short identity for one inbox entry, derived from the line itself.
+
+    The stamp is good to the second, so two marks made inside one second carry the same one
+    — and retiring or consuming by stamp would then take both, losing a passage somebody
+    chose. What makes two marks different is their words, so the line's own text names it:
+    nothing extra is written into the inbox for a person to read around, and nothing has to
+    stay in step with the text, because it is the text.
+    """
+    return hashlib.sha256(line.strip().encode("utf-8")).hexdigest()[:8]
+
+
 def _next_id(annotations: list[dict]) -> str:
     highest = 0
     for annotation in annotations:
@@ -347,14 +359,20 @@ class Store:
             existing = self.inbox()
             self._atomic_write(self.inbox_path, existing + entry)
 
-    def retire_marks(self, upto: str = "") -> int:
-        """Retire the marks up to *upto*, or every mark when it is empty.
+    def retire_marks(self, upto: str = "", identity: str = "") -> int:
+        """Retire one mark by its id, the marks up to *upto*, or every mark when both are empty.
 
         `notify` only ever appends, so a folder nothing retires holds every mark ever
         made, and a document's "×8" means eight marks made rather than eight waiting.
         Retiring is a separate, explicit act and not something a read does: reading is
         not acting, and a mark cleared before its work is done is a reminder thrown
         away.
+
+        The two ways in are not the same act. A watermark takes every mark at or before a
+        stamp, which is what "I have dealt with these" means and what `BoardState` prints.
+        An *identity* takes the one entry whose words it names — what the trigger needs,
+        since it answers one mark per turn and must not sweep away older ones nobody has
+        read yet. Two marks can share a stamp; they cannot share a line.
 
         A line whose stamp cannot be read is kept. A stamp that cannot be read at all
         is refused, because the alternative is a typo retiring the whole queue.
@@ -364,12 +382,21 @@ class Store:
             cutoff = _stamp(upto)
             if cutoff is None:
                 raise UnknownStamp(upto)
+        wanted = identity.strip().lower()
         with self._lock:
             kept: list[str] = []
             retired = 0
             for line in self.inbox().splitlines(keepends=True):
                 stamp = _mark_stamp(line)
-                if stamp is not None and (cutoff is None or stamp <= cutoff):
+                if stamp is None:
+                    kept.append(line)
+                    continue
+                take = (
+                    mark_id(line) == wanted
+                    if wanted
+                    else cutoff is None or stamp <= cutoff
+                )
+                if take:
                     retired += 1
                     continue
                 kept.append(line)

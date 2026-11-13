@@ -171,11 +171,12 @@ tools. Three properties, each with a reason:
 - **Off unless `ZRB_BOARD_NUDGE` is set.** A program that starts turns on your behalf should
   be one you switched on. The switch is read at every look; the trigger is registered once,
   when the chat starts, so turning it on is a new chat.
-- **One turn per mark.** A ledger of consumed stamps in `.board/nudge.json`, written before
-  the turn is yielded. Retiring the mark is the turn's own job; the ledger is what holds
-  when the turn forgets or dies halfway. The order matters: written first and returned
-  second, a broken turn leaves the mark visibly still in the inbox — the mendable failure —
-  rather than answering it forever.
+- **One turn per mark, claimed one at a time.** A ledger of claimed ids in
+  `.board/nudge.json`, written immediately before *that* mark's turn and never for a batch:
+  claiming the inbox up front would lose every mark after the first if the chat stopped
+  between turns — still in the inbox, already counted as answered. The id is a hash of the
+  mark's own line (`store.mark_id`), because a stamp is good to the second and two marks made
+  together share one; retiring an id leaves the mark beside it.
 - **The inbox is read as a file, not over HTTP.** The trigger runs on the machine that holds
   the board, so a stopped server does not silence a mark.
 

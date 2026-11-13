@@ -369,7 +369,7 @@ def BoardResolveNote(name: str, note_id: str, purpose: str = "") -> str:
     return f"Closed note {note_id} on {name}."
 
 
-def BoardRetireMarks(upto: str = "", purpose: str = "") -> str:
+def BoardRetireMarks(upto: str = "", id: str = "", purpose: str = "") -> str:
     """Retire inbox marks that have been dealt with, so "waiting" means waiting.
 
     A mark is only ever appended to, so BoardState counts every mark ever made: "×8"
@@ -379,11 +379,17 @@ def BoardRetireMarks(upto: str = "", purpose: str = "") -> str:
 
     Args:
       upto: The newest mark to retire, by the timestamp BoardState prints beside it;
-        every mark at or before that stamp goes with it. Empty retires every mark.
+        every mark at or before that stamp goes with it. Empty retires every mark, but
+        only when no `id` is given.
+      id: The one mark to retire, by the id the nudge puts in the message it hands you.
+        Use this when answering a single mark: a stamp is only good to the second, so
+        two marks made together share one, and `upto` would take marks nobody has read.
       purpose: One short phrase saying what this call is for, as zrb asks of every tool.
         Nothing here reads it: it is declared so a call that fills it is not refused.
     """
-    retired = _json("POST", "/api/inbox/retire", {"upto": upto})["retired"]
+    retired = _json("POST", "/api/inbox/retire", {"upto": upto, "id": id})["retired"]
     if not retired:
+        if id:
+            return "Nothing retired: no mark in the inbox has that id any more."
         return "Nothing retired: no mark in the inbox is at or before that time."
     return f"Retired {retired} mark{'' if retired == 1 else 's'}. BoardState lists only what is left."

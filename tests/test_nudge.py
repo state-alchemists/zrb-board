@@ -2,15 +2,20 @@
 
 No zrb and no server here — the trigger only reads a file and a ledger, so it is tested the
 way it runs: a temporary folder with an inbox in it, and a switch in the environment.
+
+The two things these tests are most careful about are the two ways a queue quietly loses
+work: claiming a whole inbox that only half got answered, and treating a stamp — good to
+the second — as if it named one mark.
 """
 
 import asyncio
 
 import pytest
 
-from board import config, nudge
+from board import config, nudge, store
 
 MARK = "- 2026-11-08T12:44:56+07:00 — board: 0001-one — the words I selected"
+OTHER = "- 2026-11-08T12:44:56+07:00 — board: 0001-one — a second passage, same second"
 BARE = "- 2026-11-08T12:44:56+07:00 — board: 0001-one"
 
 
@@ -26,13 +31,15 @@ def write_inbox(meta, *lines):
     (meta / nudge.INBOX_NAME).write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def test_a_mark_is_read_into_its_document_its_stamp_and_its_passage(meta):
+def test_a_mark_is_read_into_its_id_its_document_its_stamp_and_its_passage(meta):
     write_inbox(meta, MARK, BARE)
     marks = nudge.read_inbox_marks(meta)
     assert [mark.name for mark in marks] == ["0001-one", "0001-one"]
     assert marks[0].stamp == "2026-11-08T12:44:56+07:00"
     assert marks[0].quote == "the words I selected"
     assert marks[1].quote == ""
+    assert marks[0].id == store.mark_id(MARK)
+    assert marks[0].id != marks[1].id
 
 
 def test_a_line_that_is_not_a_mark_is_skipped(meta):
@@ -42,59 +49,92 @@ def test_a_line_that_is_not_a_mark_is_skipped(meta):
 
 def test_a_passage_asks_for_the_answer_beside_it(meta):
     write_inbox(meta, MARK)
-    (prompt,) = [mark.prompt() for mark in nudge.take_unread_marks(meta)]
+    mark = nudge.next_unread_mark(meta)
+    prompt = mark.prompt()
     assert 'BoardNote("0001-one", "the words I selected"' in prompt
-    assert 'BoardRetireMarks(upto="2026-11-08T12:44:56+07:00")' in prompt
+    assert f'BoardRetireMarks(id="{mark.id}")' in prompt
     assert "answer here in the chat" not in prompt
 
 
 def test_no_passage_answers_in_the_chat_and_says_why(meta):
     write_inbox(meta, BARE)
-    (prompt,) = [mark.prompt() for mark in nudge.take_unread_marks(meta)]
+    prompt = nudge.next_unread_mark(meta).prompt()
     assert "answer here in the chat" in prompt
     assert "BoardNote" not in prompt, "a mark with no quotation has nothing to anchor a note to"
-    assert 'BoardRetireMarks(upto="2026-11-08T12:44:56+07:00")' in prompt
 
 
-def test_the_ledger_stops_the_same_mark_from_being_answered_twice(meta):
+def test_marks_are_claimed_one_at_a_time(meta):
+    write_inbox(meta, MARK, OTHER)
+    first = nudge.next_unread_mark(meta)
+    second = nudge.next_unread_mark(meta)
+    assert first.quote == "the words I selected"
+    assert second.quote == "a second passage, same second"
+    assert nudge.next_unread_mark(meta) is None
+
+
+def test_two_marks_in_one_second_are_two_marks_not_one(meta):
+    # The reviewer's case: the stamp is good to the second, so the stamp cannot be the id.
+    write_inbox(meta, MARK, OTHER)
+    marks = nudge.read_inbox_marks(meta)
+    assert marks[0].stamp == marks[1].stamp
+    assert marks[0].id != marks[1].id
+    nudge.next_unread_mark(meta)
+    assert nudge.next_unread_mark(meta) is not None, "the second mark must still get a turn"
+
+
+def test_two_lines_with_the_same_words_are_one_mark(meta):
+    write_inbox(meta, MARK, MARK)
+    assert len(nudge.read_inbox_marks(meta)) == 2
+    assert nudge.next_unread_mark(meta) is not None
+    assert nudge.next_unread_mark(meta) is None, "identical words are one intention"
+
+
+def test_the_ledger_holds_ids_and_not_stamps(meta):
     write_inbox(meta, MARK)
-    assert len(nudge.take_unread_marks(meta)) == 1
-    assert nudge.take_unread_marks(meta) == []
+    mark = nudge.next_unread_mark(meta)
+    written = (meta / nudge.LEDGER_NAME).read_text(encoding="utf-8")
+    assert mark.id in written
+    assert mark.stamp not in written, "a stamp belongs to two marks at once; an id does not"
 
 
-def test_a_restart_does_not_re_fire_what_was_already_taken(meta):
+def test_a_restart_does_not_re_fire_what_was_already_claimed(meta):
     # The ledger is on disk, so nothing here depends on a process staying alive.
     write_inbox(meta, MARK)
-    nudge.take_unread_marks(meta)
-    assert nudge.consumed_stamps(meta) == {"2026-11-08T12:44:56+07:00"}
-    assert nudge.take_unread_marks(meta) == []
+    nudge.next_unread_mark(meta)
+    assert nudge.claimed_ids(meta) == {store.mark_id(MARK)}
+    assert nudge.next_unread_mark(meta) is None
+
+
+def test_a_chat_that_stops_after_one_turn_does_not_lose_the_second(meta):
+    # The claim happens as each mark is reached, not for the whole inbox up front, so a
+    # process that dies between turns leaves the rest of the queue answerable.
+    write_inbox(meta, MARK, OTHER)
+    marks = nudge._claim_in_order(meta)
+    first = next(marks)
+    marks.close()
+    assert first.quote == "the words I selected"
+    assert nudge.claimed_ids(meta) == {store.mark_id(MARK)}
+    assert nudge.next_unread_mark(meta).quote == "a second passage, same second"
 
 
 def test_a_new_mark_after_an_answered_one_is_still_taken(meta):
     write_inbox(meta, MARK)
-    nudge.take_unread_marks(meta)
+    nudge.next_unread_mark(meta)
     write_inbox(meta, MARK, "- 2026-11-08T12:50:00+07:00 — board: 0002-two")
-    assert [mark.name for mark in nudge.take_unread_marks(meta)] == ["0002-two"]
+    assert nudge.next_unread_mark(meta).name == "0002-two"
 
 
 def test_a_mark_retired_by_hand_does_not_come_back(meta):
     write_inbox(meta, MARK)
-    nudge.take_unread_marks(meta)
+    nudge.next_unread_mark(meta)
     write_inbox(meta)  # the inbox is empty: BoardRetireMarks removed the line
-    assert nudge.take_unread_marks(meta) == []
+    assert nudge.next_unread_mark(meta) is None
 
 
 def test_an_unreadable_ledger_costs_a_repeat_and_not_a_crash(meta):
     write_inbox(meta, MARK)
     (meta / nudge.LEDGER_NAME).write_text("{ not json", encoding="utf-8")
-    assert len(nudge.take_unread_marks(meta)) == 1
-
-
-def test_the_ledger_never_names_a_document(meta):
-    write_inbox(meta, MARK)
-    nudge.take_unread_marks(meta)
-    written = (meta / nudge.LEDGER_NAME).read_text(encoding="utf-8")
-    assert "0001-one" not in written, "the ledger holds stamps, not documents"
+    assert nudge.next_unread_mark(meta) is not None
 
 
 def test_the_switch_is_off_until_it_is_set(monkeypatch, meta):
@@ -106,21 +146,22 @@ def test_the_switch_is_off_until_it_is_set(monkeypatch, meta):
         return [item async for item in nudge.board_nudge()]
 
     assert asyncio.run(collect()) == []
-    assert nudge.take_unread_marks(meta) != [], "nothing was consumed while it was off"
+    assert nudge.claimed_ids(meta) == set(), "nothing is claimed while it is off"
 
 
-def test_the_switch_is_read_every_look_not_at_import(monkeypatch, meta):
+def test_the_trigger_yields_each_mark_once_and_then_waits(monkeypatch, meta):
     monkeypatch.setenv(config.env_name("META"), str(meta))
     monkeypatch.setenv(config.env_name("NUDGE_EVERY"), "0")
     monkeypatch.setenv(config.env_name("NUDGE"), "1")
-    write_inbox(meta, MARK)
+    write_inbox(meta, MARK, OTHER)
 
-    async def first_turn():
+    async def two_turns():
         trigger = nudge.board_nudge()
         try:
-            return await trigger.__anext__()
+            return [await trigger.__anext__(), await trigger.__anext__()]
         finally:
             await trigger.aclose()
 
-    prompt = asyncio.run(first_turn())
-    assert 'BoardNote("0001-one"' in prompt
+    first, second = asyncio.run(two_turns())
+    assert 'BoardNote("0001-one", "the words I selected"' in first
+    assert 'BoardNote("0001-one", "a second passage, same second"' in second

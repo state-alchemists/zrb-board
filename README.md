@@ -208,9 +208,10 @@ Three things the trigger is careful about:
 
 - **off by default** — a program that starts turns on your behalf should be one you switched
   on; `ZRB_BOARD_NUDGE_EVERY` sets how often it looks, 15 seconds otherwise
-- **one turn per mark** — a ledger of consumed stamps in `.board/nudge.json`, written before
-  the turn starts, so a restart cannot answer the same mark twice even when the turn that
-  did answer it died before it retired the line
+- **one turn per mark** — each mark is claimed in `.board/nudge.json` immediately before its
+  own turn, so a restart cannot answer it twice and a chat that stops between turns loses
+  nothing. The claim names the mark by a hash of its own line, never by its timestamp: two
+  marks made in the same second are still two marks, and retiring one leaves the other
 - **the server need not be up** — the inbox is read as a file, so a mark left while the board
   is stopped still becomes a turn
 

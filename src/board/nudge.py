@@ -4,14 +4,18 @@
 the browser is answered without anyone typing first. A trigger is a callable returning an
 async iterable, and every item it yields is a user turn (`zrb/llm/ui/trigger.py:1-11`).
 
-Three rules this file exists to keep:
+Four rules this file exists to keep:
 
 - **Off unless switched on.** A mark may start a turn only while `ZRB_BOARD_NUDGE` is set.
   The switch is read at every look, but the trigger is registered once, when the chat
   starts, so switching it on is a new chat and switching it off is the next look.
-- **One mark, one turn.** A ledger of consumed stamps sits beside the inbox, so a restart
-  cannot answer the same mark twice. Retiring the mark is the turn's own job; the ledger is
-  what holds if the turn forgets, or dies halfway.
+- **One mark, one turn, claimed one at a time.** A ledger of claimed ids sits beside the
+  inbox, and an id is written into it immediately before that mark is yielded — never for a
+  whole batch. Claiming the inbox up front would lose every mark after the first if the
+  chat stopped between turns: still in the inbox, already counted as answered.
+- **A stamp is not an identity.** Stamps are good to the second, so two marks made together
+  share one. The id is `store.mark_id(line)` — a hash of the mark's own words — so two
+  passages marked in the same second stay two marks, and retiring one leaves the other.
 - **Nothing here imports zrb.** Only `zrb_init.py` needs zrb, so the server, the tests and
   a one-off `python -c` can all read this file.
 
@@ -28,7 +32,7 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-from board import config
+from board import config, store
 
 INBOX_NAME = "inbox.md"
 LEDGER_NAME = "nudge.json"
@@ -36,8 +40,9 @@ LEDGER_NAME = "nudge.json"
 
 @dataclass(frozen=True)
 class Mark:
-    """One inbox line read: when it was made, which document, and what passage."""
+    """One inbox line read: which entry it is, when, which document, and what passage."""
 
+    id: str
     stamp: str
     name: str
     quote: str = ""
@@ -47,9 +52,10 @@ class Mark:
 
         The passage is what makes the answer a note rather than a sentence: `BoardNote`
         anchors by quotation, so a mark that carries none is answered in the chat and says
-        so, instead of the turn inventing a quote to hang an answer on.
+        so, instead of the turn inventing a quote to hang an answer on. Retirement names
+        the id rather than a stamp, because a stamp can belong to two marks at once.
         """
-        retire = f'BoardRetireMarks(upto="{self.stamp}")'
+        retire = f'BoardRetireMarks(id="{self.id}")'
         if not self.quote:
             return (
                 f"board: {self.name} is marked, with no passage chosen. "
@@ -91,51 +97,56 @@ def _read_mark_line(line: str) -> Mark | None:
         return None
     said = text.removeprefix("board:").strip()
     name, _, quote = said.partition(" — ")
-    return Mark(stamp=stamp.strip(), name=name.strip() or "the board", quote=quote.strip())
+    return Mark(
+        id=store.mark_id(line),
+        stamp=stamp.strip(),
+        name=name.strip() or "the board",
+        quote=quote.strip(),
+    )
 
 
-def consumed_stamps(meta: Path) -> set[str]:
-    """The stamps a turn has already been spent on. An unreadable ledger costs a repeat."""
+def claimed_ids(meta: Path) -> set[str]:
+    """The marks a turn has already been spent on. An unreadable ledger costs a repeat."""
     path = meta / LEDGER_NAME
     if not path.is_file():
         return set()
     try:
-        return set(json.loads(path.read_text(encoding="utf-8")).get("consumed", []))
+        return set(json.loads(path.read_text(encoding="utf-8")).get("claimed", []))
     except (ValueError, OSError):
         return set()
 
 
-def take_unread_marks(meta: Path) -> list[Mark]:
-    """The marks nobody has answered yet, written down as consumed before they are handed out.
+def next_unread_mark(meta: Path) -> Mark | None:
+    """The oldest mark nobody has answered, claimed in the ledger before it is handed over.
 
-    The ledger is written first and the marks returned second, on purpose. A turn that dies
-    halfway leaves the mark retired from the ledger's view and still in the inbox: the
-    visible half of the failure, and the one a person can mend with `BoardRetireMarks`. The
-    other order would answer the same mark on every look, forever.
+    One at a time, on purpose. The ledger entry goes in immediately before this mark's own
+    turn is yielded, so a chat that stops between turns loses nothing: every mark after this
+    one is still unclaimed, and this one is still visible in the inbox to be mended by hand.
 
-    Two marks made in the same second share a stamp and the second reads as consumed. That
-    is the inbox's own granularity — `retire_marks` also removes by stamp — so the ledger
-    loses nothing the rest of the board does not already lose.
+    Two lines with identical words share an id, and therefore count as one mark. That is the
+    one thing the words cannot tell apart — and two identical marks are one intention.
     """
-    stamps = consumed_stamps(meta)
-    unread = [mark for mark in read_inbox_marks(meta) if mark.stamp not in stamps]
-    if unread:
-        stamps.update(mark.stamp for mark in unread)
-        write_ledger(meta, stamps)
-    return unread
+    claimed = claimed_ids(meta)
+    for mark in read_inbox_marks(meta):
+        if mark.id in claimed:
+            continue
+        claimed.add(mark.id)
+        write_ledger(meta, claimed)
+        return mark
+    return None
 
 
-def write_ledger(meta: Path, stamps: set[str]) -> None:
+def write_ledger(meta: Path, claimed: set[str]) -> None:
     """Replace the ledger atomically: a reader never sees half a file."""
     meta.mkdir(parents=True, exist_ok=True)
     path = meta / LEDGER_NAME
     temporary = path.with_name(f"{LEDGER_NAME}.tmp")
-    temporary.write_text(json.dumps({"consumed": sorted(stamps)}, indent=2), encoding="utf-8")
+    temporary.write_text(json.dumps({"claimed": sorted(claimed)}, indent=2), encoding="utf-8")
     os.replace(temporary, path)
 
 
 async def board_nudge():
-    """Yield one turn per unread mark, then look again after `NUDGE_EVERY` seconds.
+    """Yield one turn per unclaimed mark, then look again after `NUDGE_EVERY` seconds.
 
     This is the shape `append_trigger` takes — a callable returning an async iterable —
     and returning before the first `yield` is what keeps the default silent.
@@ -145,10 +156,22 @@ async def board_nudge():
     every = config.nudge_every()
     meta = config.meta_dir()
     while True:
-        try:
-            marks = take_unread_marks(meta)
-        except OSError:
-            marks = []  # no board folder yet is a wait, not a failure
-        for mark in marks:
+        for mark in _claim_in_order(meta):
             yield mark.prompt()
         await asyncio.sleep(every)
+
+
+def _claim_in_order(meta: Path):
+    """Claim marks one at a time until the inbox has none left, then stop.
+
+    A generator of its own so the claim for each mark happens as that mark is reached —
+    after the turn before it has finished, and never for marks that are only queued.
+    """
+    while True:
+        try:
+            mark = next_unread_mark(meta)
+        except OSError:
+            return  # no board folder yet is a wait, not a failure
+        if mark is None:
+            return
+        yield mark
