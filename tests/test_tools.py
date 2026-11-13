@@ -54,6 +54,17 @@ def test_marks_fold_per_document_and_keep_the_newest_time():
     assert tools._marks_waiting([]) == ["(no marks waiting)"]
 
 
+def test_a_mark_that_carries_a_passage_still_folds_to_its_document():
+    # Two passages marked on one page are two marks on one document, not two documents.
+    inbox = [
+        "- 2026-11-08T09:02:26+07:00 — board: 0001-one — the first passage",
+        "- 2026-11-08T09:04:34+07:00 — board: 0001-one — the second passage",
+    ]
+    assert tools._marks_waiting(inbox) == [
+        "- 0001-one ×2 — newest 2026-11-08T09:04:34+07:00"
+    ]
+
+
 def test_a_conflict_is_recognised_even_when_the_document_is_empty():
     # A stale write against an empty document must still come back as the merge response,
     # so the body's keys decide, not its values.

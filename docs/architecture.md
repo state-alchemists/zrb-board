@@ -160,14 +160,29 @@ pixels from the finger.
 
 ## 7. The nudge is a trigger, not a queue
 
-The "mark for next message" button appends a line to `.board/inbox.md` and nothing
-more — a browser cannot make an agent take a turn.
+The "mark for next message" button appends a line to `.board/inbox.md` — naming the
+document, and carrying the passage the mark was made on — and nothing more: a browser
+cannot make an agent take a turn.
 
-The mechanism that can is zrb's trigger: a generator registered on the chat
-task that yields a turn when there is something to say. zrb-avatar already
-runs its nudge this way. The board's version will poll the inbox, keep a
-ledger of consumed lines so a restart cannot re-fire, and default to **off** —
-a program that starts turns on your behalf should be one you switched on.
+The mechanism that can is zrb's trigger, and it is built. `board/nudge.py` yields one turn
+per unread mark, and `board/zrb_init.py` registers it on the chat task beside the seven
+tools. Three properties, each with a reason:
+
+- **Off unless `ZRB_BOARD_NUDGE` is set.** A program that starts turns on your behalf should
+  be one you switched on. The switch is read at every look; the trigger is registered once,
+  when the chat starts, so turning it on is a new chat.
+- **One turn per mark.** A ledger of consumed stamps in `.board/nudge.json`, written before
+  the turn is yielded. Retiring the mark is the turn's own job; the ledger is what holds
+  when the turn forgets or dies halfway. The order matters: written first and returned
+  second, a broken turn leaves the mark visibly still in the inbox — the mendable failure —
+  rather than answering it forever.
+- **The inbox is read as a file, not over HTTP.** The trigger runs on the machine that holds
+  the board, so a stopped server does not silence a mark.
+
+Where the answer lands follows from what the mark carries. A passage is answered in the
+margin, anchored by that quotation, through `BoardNote`; a mark made with nothing selected
+has no quotation to anchor to, and is answered in the chat, which the trigger's own words
+say rather than leaving the agent to invent one.
 
 *Rejected:* pushing a message into a running web-chat session. It works, but
 only if a web session exists and the board knows its id and token; the terminal

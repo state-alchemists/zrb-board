@@ -1,8 +1,10 @@
-"""The board's zrb side: load it and the agent gets seven tools for the board.
+"""The board's zrb side: load it and the agent gets seven tools for the board, and a nudge.
 
     export ZRB_INIT_SCRIPTS="$ZRB_INIT_SCRIPTS:$(zrb-board init-path)"
 
-The tools themselves are `board/tools.py`; this file only puts them on zrb's chat task.
+The tools themselves are `board/tools.py` and the trigger is `board/nudge.py`; this file
+only puts them on zrb's chat task. The trigger yields nothing unless `ZRB_BOARD_NUDGE` is
+set, so loading this file does not make the agent start turns behind anybody's back.
 Nothing in the server imports it, and `board.app` runs without zrb installed.
 
 Read on the first turn the user says "board" (the marker's own convention): `BoardState`
@@ -23,6 +25,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from zrb.builtin import llm_chat  # noqa: E402
 
+from board.nudge import board_nudge  # noqa: E402
 from board.tools import (  # noqa: E402
     BoardCreate,
     BoardNote,
@@ -43,3 +46,9 @@ for tool in (
     BoardRetireMarks,
 ):
     llm_chat.append_tool(tool)
+
+# The nudge: a mark left in the browser can start a turn instead of waiting for one. It is
+# registered unconditionally and returns immediately unless `ZRB_BOARD_NUDGE` is set, so the
+# switch is a board setting rather than a second script to install. Read it, and the rest of
+# the reasoning, in `board/nudge.py`.
+llm_chat.append_trigger(board_nudge)

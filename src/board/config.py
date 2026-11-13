@@ -18,6 +18,9 @@ Every setting is `$<prefix>_BOARD_<NAME>`:
     META    the notes folder alone, instead of `<home>/.board`
     HOST    the address to bind — 127.0.0.1 by default, because this is a desk
     PORT    8765 by default
+    NUDGE   `1` lets a mark start a turn on its own; off by default
+    NUDGE_EVERY
+            seconds between looks at the inbox, 15 by default
 
 The environment is read when the server starts, not when this module is
 imported, so a test can point `DOCS` at a temporary folder and a shell can
@@ -37,6 +40,9 @@ DEFAULT_HOST = "127.0.0.1"
 # clear of zrb's web port (21213), which a board URL is often pasted next to -- and it is
 # a default, not a decision: ZRB_BOARD_PORT moves it.
 DEFAULT_PORT = 8765
+# Fifteen seconds: fast enough that a mark feels answered, slow enough that a mark made
+# while a turn is running is not read again and again for the length of that turn.
+DEFAULT_NUDGE_EVERY = 15.0
 
 
 def env_name(setting: str, prefix: str | None = None) -> str:
@@ -75,6 +81,24 @@ def host() -> str:
 
 def port() -> int:
     return int(env_get("PORT", str(DEFAULT_PORT)))
+
+
+def nudge_enabled() -> bool:
+    """Whether a mark may start a turn. Off unless `..._BOARD_NUDGE` says otherwise.
+
+    A program that starts turns on your behalf should be one you switched on, so the
+    absence of the variable is a no, not a default to be guessed at.
+    """
+    return env_get("NUDGE").strip().lower() in ("1", "true", "yes", "on")
+
+
+def nudge_every() -> float:
+    """How long to wait between looks at the inbox, in seconds."""
+    said = env_get("NUDGE_EVERY").strip()
+    try:
+        return float(said) if said else DEFAULT_NUDGE_EVERY
+    except ValueError:
+        return DEFAULT_NUDGE_EVERY
 
 
 def url() -> str:

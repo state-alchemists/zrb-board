@@ -155,6 +155,17 @@ def _is_note(annotation: dict) -> bool:
     return annotation.get("kind", "note") == "note"
 
 
+def _mark_document(text: str) -> str:
+    """The document one mark names: the first word after `board:`.
+
+    A mark may carry the passage it was made on after an em dash, so the name is the first
+    word rather than the whole remainder — otherwise two marks on two paragraphs of the
+    same document would count as two documents, and the ×N on a page would stop adding up.
+    """
+    said = text.removeprefix("board:").strip()
+    return said.partition(" — ")[0].strip() or "the board"
+
+
 def _marks_waiting(inbox: list[str]) -> list[str]:
     """One line per document still marked, the newest mark's time kept.
 
@@ -168,7 +179,7 @@ def _marks_waiting(inbox: list[str]) -> list[str]:
     waiting: dict[str, dict] = {}
     for line in inbox:
         stamp, _, text = line.strip().removeprefix("- ").partition(" — ")
-        name = text.removeprefix("board:").strip() or "the board"
+        name = _mark_document(text)
         entry = waiting.setdefault(name, {"count": 0, "newest": stamp})
         entry["count"] += 1
         entry["newest"] = stamp  # the folder is oldest first, so the last read is newest

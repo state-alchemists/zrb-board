@@ -48,6 +48,11 @@ read from `_ZRB_ENV_PREFIX`, so a white-labeled zrb needs no code change:
 | `ZRB_BOARD_META` | `<home>/.board` | the notes folder alone |
 | `ZRB_BOARD_HOST` | `127.0.0.1` | the address to bind |
 | `ZRB_BOARD_PORT` | `8765` | the port |
+| `ZRB_BOARD_NUDGE` | unset — off | `1` lets an unread mark start a chat turn on its own |
+| `ZRB_BOARD_NUDGE_EVERY` | `15` | seconds between the trigger's looks at the inbox |
+
+The last two are read by the chat's trigger, not by the server: setting them changes nothing
+about the board that is serving.
 
 It binds loopback only and has no authentication — it is a desk, not a service.
 
@@ -185,16 +190,36 @@ binds (`ZRB_BOARD_HOST`, `ZRB_BOARD_PORT`). `BOARD_AUTHOR` signs a note, `agent`
 is set. The tools read the marker folder as a whole and fold it by document, because
 nothing ever clears it.
 
-## The button is a note, not a bell
+## The button is a note, and a nudge you switch on
 
-"Mark for next message" appends a line to `.board/inbox.md` in the board's home
-folder. It cannot wake the agent —
-the agent runs when it is spoken to. The marker waits for the next turn, and
-the convention is that the word `board` in a message means: read the inbox,
-then read the state of the open documents.
+"Mark for next message" appends one line to `.board/inbox.md` in the board's home folder —
+the line names the document, and carries the passage you had selected. The agent reads it
+the next time it is spoken to, and the convention is that the word `board` in a message
+means: read the inbox, then read the state of the open documents.
 
-Making the button actually notify would be a change in zrb — a live-context
-line carrying the unread count — and is deliberately not built here yet.
+The board can also start that turn itself. `src/board/zrb_init.py` registers a chat trigger
+beside the seven tools (`zrb/llm/ui/trigger.py`), so with `ZRB_BOARD_NUDGE=1` an unread mark
+becomes a turn with nobody typing: the agent reads the document, answers the passage **in
+the margin beside it** with `BoardNote`, and retires the mark it answered. A mark made with
+nothing selected has no quotation to anchor a note to, so that answer comes back in the
+chat, and the trigger says so rather than inventing a quotation.
+
+Three things the trigger is careful about:
+
+- **off by default** — a program that starts turns on your behalf should be one you switched
+  on; `ZRB_BOARD_NUDGE_EVERY` sets how often it looks, 15 seconds otherwise
+- **one turn per mark** — a ledger of consumed stamps in `.board/nudge.json`, written before
+  the turn starts, so a restart cannot answer the same mark twice even when the turn that
+  did answer it died before it retired the line
+- **the server need not be up** — the inbox is read as a file, so a mark left while the board
+  is stopped still becomes a turn
+
+### What this section used to say
+
+It said the button could only ever be "a live-context line carrying the unread count", and
+that making it notify was deliberately not built. That describes the mechanism
+`docs/architecture.md` §7 rejects: a line in the prompt is passive, so the mark still waits
+for someone to speak. The description was wrong before the code was.
 
 ## Tests
 
