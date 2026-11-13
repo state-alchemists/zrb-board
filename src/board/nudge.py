@@ -54,20 +54,25 @@ class Mark:
         anchors by quotation, so a mark that carries none is answered in the chat and says
         so, instead of the turn inventing a quote to hang an answer on. Retirement names
         the id rather than a stamp, because a stamp can belong to two marks at once.
+
+        The arguments are JSON strings, not the passage pasted between quote marks: a
+        selected passage can contain `"` all by itself, and `BoardNote("doc", "He said
+        "no"")` is not a call anybody can read — least of all the agent it is addressed to.
         """
-        retire = f'BoardRetireMarks(id="{self.id}")'
+        retire = f"BoardRetireMarks(id={json.dumps(self.id)})"
+        name = json.dumps(self.name)
         if not self.quote:
             return (
                 f"board: {self.name} is marked, with no passage chosen. "
-                f'Read it with BoardRead("{self.name}"), answer here in the chat — there '
-                f"is no quotation to anchor a note to — and then retire this mark: {retire}."
+                f"Read it with BoardRead({name}), answer here in the chat — there is no "
+                f"quotation to anchor a note to — and then retire this mark: {retire}."
             )
         return (
             f"board: {self.name} is marked, on this passage:\n\n"
             f"> {self.quote}\n\n"
             f"Read the document, answer that passage in the margin with "
-            f'BoardNote("{self.name}", "{self.quote}", your answer) — the quotation is what '
-            f"anchors it — and then retire this mark: {retire}. If that passage can no "
+            f"BoardNote({name}, {json.dumps(self.quote)}, your answer) — the quotation is "
+            f"what anchors it — and then retire this mark: {retire}. If that passage can no "
             f"longer be anchored, because the words were edited or moved, answer in the "
             f"chat and say so rather than guessing at a quotation."
         )
@@ -148,26 +153,26 @@ def write_ledger(meta: Path, claimed: set[str]) -> None:
 async def board_nudge():
     """Yield one turn per unclaimed mark, then look again after `NUDGE_EVERY` seconds.
 
-    This is the shape `append_trigger` takes — a callable returning an async iterable —
-    and returning before the first `yield` is what keeps the default silent.
+    This is the shape `append_trigger` takes — a callable returning an async iterable. The
+    switch is read before every look, not once at the start, so turning the nudge off takes
+    effect at the next look rather than at the next chat; while it is off this generator
+    simply yields nothing and keeps sleeping.
     """
-    if not config.nudge_enabled():
-        return
-    every = config.nudge_every()
-    meta = config.meta_dir()
     while True:
-        for mark in _claim_in_order(meta):
-            yield mark.prompt()
-        await asyncio.sleep(every)
+        if config.nudge_enabled():
+            for mark in _claim_in_order(config.meta_dir()):
+                yield mark.prompt()
+        await asyncio.sleep(config.nudge_every())
 
 
-def _claim_in_order(meta: Path):
-    """Claim marks one at a time until the inbox has none left, then stop.
+def _claim_in_order(meta: Path, enabled=config.nudge_enabled):
+    """Claim marks one at a time, asking *enabled* before each, until the inbox is empty.
 
     A generator of its own so the claim for each mark happens as that mark is reached —
-    after the turn before it has finished, and never for marks that are only queued.
+    after the turn before it has finished, and never for marks that are only queued — and
+    so the switch can stop the queue between two marks rather than after all of them.
     """
-    while True:
+    while enabled():
         try:
             mark = next_unread_mark(meta)
         except OSError:

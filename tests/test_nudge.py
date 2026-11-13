@@ -9,6 +9,7 @@ the second — as if it named one mark.
 """
 
 import asyncio
+import json
 
 import pytest
 
@@ -109,7 +110,7 @@ def test_a_chat_that_stops_after_one_turn_does_not_lose_the_second(meta):
     # The claim happens as each mark is reached, not for the whole inbox up front, so a
     # process that dies between turns leaves the rest of the queue answerable.
     write_inbox(meta, MARK, OTHER)
-    marks = nudge._claim_in_order(meta)
+    marks = nudge._claim_in_order(meta, enabled=lambda: True)
     first = next(marks)
     marks.close()
     assert first.quote == "the words I selected"
@@ -137,15 +138,48 @@ def test_an_unreadable_ledger_costs_a_repeat_and_not_a_crash(meta):
     assert nudge.next_unread_mark(meta) is not None
 
 
+def test_the_switch_is_consulted_before_every_mark(meta):
+    # Turning it off stops the queue between two marks, not after all of them.
+    write_inbox(meta, MARK, OTHER)
+    asked = []
+
+    def enabled():
+        asked.append(True)
+        return len(asked) == 1  # the first mark only
+
+    marks = list(nudge._claim_in_order(meta, enabled=enabled))
+    assert len(marks) == 1
+    assert len(asked) == 2, "asked again before the second mark, and refused"
+    assert nudge.next_unread_mark(meta).quote == "a second passage, same second"
+
+
+def test_a_passage_with_quotes_in_it_is_still_one_argument(meta):
+    # `He said "no"` pasted between quote marks produces a call nobody can read.
+    passage = 'He said "no" and left'
+    write_inbox(meta, f"- 2026-11-08T12:44:56+07:00 — board: 0001-one — {passage}")
+    prompt = nudge.next_unread_mark(meta).prompt()
+    arguments = prompt.split("BoardNote(")[1].split(", your answer)")[0]
+    name, quote = json.loads(f"[{arguments}]")
+    assert (name, quote) == ("0001-one", passage)
+
+
 def test_the_switch_is_off_until_it_is_set(monkeypatch, meta):
     monkeypatch.delenv(config.env_name("NUDGE"), raising=False)
     monkeypatch.setenv(config.env_name("META"), str(meta))
+    monkeypatch.setenv(config.env_name("NUDGE_EVERY"), "0.01")
     write_inbox(meta, MARK)
 
-    async def collect():
-        return [item async for item in nudge.board_nudge()]
+    async def nothing_comes():
+        # The trigger stays alive while it is off — that is what lets it be switched on
+        # mid-chat — so "silent" is a wait with nothing in it, not an end.
+        trigger = nudge.board_nudge()
+        try:
+            with pytest.raises(asyncio.TimeoutError):
+                await asyncio.wait_for(trigger.__anext__(), timeout=0.2)
+        finally:
+            await trigger.aclose()
 
-    assert asyncio.run(collect()) == []
+    asyncio.run(nothing_comes())
     assert nudge.claimed_ids(meta) == set(), "nothing is claimed while it is off"
 
 
