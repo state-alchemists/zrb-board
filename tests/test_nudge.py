@@ -10,6 +10,7 @@ the second — as if it named one mark.
 
 import asyncio
 import json
+from datetime import datetime, timedelta
 
 import pytest
 
@@ -18,6 +19,12 @@ from board import config, nudge, store
 MARK = "- 2026-11-08T12:44:56+07:00 — board: 0001-one — the words I selected"
 OTHER = "- 2026-11-08T12:44:56+07:00 — board: 0001-one — a second passage, same second"
 BARE = "- 2026-11-08T12:44:56+07:00 — board: 0001-one"
+
+
+def mark_made_now(quote: str, name: str = "0001-one") -> str:
+    """A mark with this second on it, which is what the board writes when you click."""
+    stamp = datetime.now().astimezone().isoformat(timespec="seconds")
+    return f"- {stamp} — board: {name} — {quote}"
 
 
 @pytest.fixture
@@ -199,3 +206,72 @@ def test_the_trigger_yields_each_mark_once_and_then_waits(monkeypatch, meta):
     first, second = asyncio.run(two_turns())
     assert 'BoardNote("0001-one", "the words I selected"' in first
     assert 'BoardNote("0001-one", "a second passage, same second"' in second
+
+
+def test_a_fresh_mark_waits_for_marking_to_stop(meta):
+    # A mark made a second ago may be the first of three. Answering it now would start a
+    # turn while the next selection is still being dragged.
+    write_inbox(meta, mark_made_now("the words I selected"))
+    assert nudge.quiet_for(meta) < config.DEFAULT_NUDGE_SETTLE
+    assert nudge.next_unread_mark(meta) is None
+    assert nudge.claimed_ids(meta) == set(), "nothing is claimed while marking is going on"
+
+
+def test_the_wait_is_counted_from_the_newest_mark_not_the_one_being_answered(meta):
+    write_inbox(meta, MARK, mark_made_now("a third passage"))
+    assert nudge.next_unread_mark(meta) is None, "the old mark waits for the new one"
+
+
+def test_an_old_mark_is_answered_without_a_wait(meta):
+    write_inbox(meta, MARK)
+    assert nudge.quiet_for(meta) > config.DEFAULT_NUDGE_SETTLE
+    assert nudge.next_unread_mark(meta) is not None
+
+
+def test_a_new_mark_pauses_the_queue_between_two_turns(meta):
+    write_inbox(meta, MARK, OTHER)
+    marks = nudge._claim_in_order(meta, enabled=lambda: True)
+    assert next(marks).quote == "the words I selected"
+    write_inbox(meta, MARK, OTHER, mark_made_now("marked while the first was being answered"))
+    assert list(marks) == [], "the queue stops at a mark made mid-answer"
+    assert nudge.claimed_ids(meta) == {store.mark_id(MARK)}, "and leaves the second unclaimed"
+
+
+def test_the_wait_can_be_turned_off(monkeypatch, meta):
+    monkeypatch.setenv(config.env_name("NUDGE_SETTLE"), "0")
+    write_inbox(meta, mark_made_now("the words I selected"))
+    assert nudge.next_unread_mark(meta) is not None
+
+
+def test_a_stamp_nothing_can_read_does_not_hold_the_queue(meta):
+    write_inbox(meta, "- not-a-time — board: 0001-one — the words I selected")
+    assert nudge.quiet_for(meta) == float("inf")
+    assert nudge.next_unread_mark(meta) is not None
+
+
+def test_a_claim_that_was_never_answered_expires(meta):
+    # The chat was killed between claiming the mark and running its turn. Without a lease
+    # the mark would sit in the inbox, claimed, and be skipped for ever.
+    write_inbox(meta, MARK)
+    nudge.next_unread_mark(meta)
+    expired = datetime.now().astimezone() - timedelta(seconds=nudge.CLAIM_TTL_SECONDS + 1)
+    nudge.write_ledger(meta, {store.mark_id(MARK): expired})
+    assert nudge.claimed_ids(meta) == set()
+    assert nudge.next_unread_mark(meta) is not None, "the mark is retried, not lost"
+
+
+def test_a_live_claim_is_not_answered_twice(meta):
+    write_inbox(meta, MARK)
+    nudge.next_unread_mark(meta)
+    assert nudge.claimed_ids(meta) == {store.mark_id(MARK)}
+    assert nudge.next_unread_mark(meta) is None
+
+
+def test_the_ledger_forgets_a_mark_it_retired(meta):
+    # Otherwise a mark identical to the retired one inherits its id and is skipped.
+    write_inbox(meta, MARK)
+    nudge.next_unread_mark(meta)
+    write_inbox(meta, MARK.replace("2026-11-08", "2026-11-09"))
+    assert nudge.next_unread_mark(meta) is not None
+    written = json.loads((meta / nudge.LEDGER_NAME).read_text(encoding="utf-8"))
+    assert len(written["claimed"]) == 1, "the ledger is the size of the queue, not of history"

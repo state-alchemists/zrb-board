@@ -50,8 +50,9 @@ read from `_ZRB_ENV_PREFIX`, so a white-labeled zrb needs no code change:
 | `ZRB_BOARD_PORT` | `8765` | the port |
 | `ZRB_BOARD_NUDGE` | unset — off | `1` lets an unread mark start a chat turn on its own |
 | `ZRB_BOARD_NUDGE_EVERY` | `15` | seconds between the trigger's looks at the inbox |
+| `ZRB_BOARD_NUDGE_SETTLE` | `30` | seconds of no new marks before a turn starts |
 
-The last two are read by the chat's trigger, not by the server: setting them changes nothing
+The last three are read by the chat's trigger, not by the server: setting them changes nothing
 about the board that is serving.
 
 It binds loopback only and has no authentication — it is a desk, not a service.
@@ -204,14 +205,21 @@ the margin beside it** with `BoardNote`, and retires the mark it answered. A mar
 nothing selected has no quotation to anchor a note to, so that answer comes back in the
 chat, and the trigger says so rather than inventing a quotation.
 
-Three things the trigger is careful about:
+Four things the trigger is careful about:
 
 - **off by default** — a program that starts turns on your behalf should be one you switched
   on; `ZRB_BOARD_NUDGE_EVERY` sets how often it looks, 15 seconds otherwise
+- **not while you are still marking** — nothing is claimed until no new mark has arrived for
+  `ZRB_BOARD_NUDGE_SETTLE` seconds, thirty by default. A mark is a selection you may be about
+  to replace, or the first of three; the queue waits for the run to finish instead of
+  answering its first item while the next passage is being dragged
 - **one turn per mark** — each mark is claimed in `.board/nudge.json` immediately before its
   own turn, so a restart cannot answer it twice and a chat that stops between turns loses
   nothing. The claim names the mark by a hash of its own line, never by its timestamp: two
-  marks made in the same second are still two marks, and retiring one leaves the other
+  marks made in the same second are still two marks, and retiring one leaves the other. A
+  claim is a lease and not a tombstone — it carries the time it was made and expires after
+  ten minutes, so a chat killed between claiming a mark and running its turn costs a repeat
+  rather than a mark
 - **the server need not be up** — the inbox is read as a file, so a mark left while the board
   is stopped still becomes a turn
 

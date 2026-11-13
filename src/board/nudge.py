@@ -4,15 +4,24 @@
 the browser is answered without anyone typing first. A trigger is a callable returning an
 async iterable, and every item it yields is a user turn (`zrb/llm/ui/trigger.py:1-11`).
 
-Four rules this file exists to keep:
+Six rules this file exists to keep:
 
 - **Off unless switched on.** A mark may start a turn only while `ZRB_BOARD_NUDGE` is set.
   The switch is read at every look, but the trigger is registered once, when the chat
   starts, so switching it on is a new chat and switching it off is the next look.
+- **Marking has to have stopped.** A turn starts only once the newest mark is `NUDGE_SETTLE`
+  seconds old — thirty by default. Somebody still adding marks has not finished the ones
+  already in the queue, and an answer that arrives while the next selection is being dragged
+  is an interruption rather than help. Measured from the newest mark rather than from the one
+  about to be answered, so a run of marks is answered after the run.
 - **One mark, one turn, claimed one at a time.** A ledger of claimed ids sits beside the
   inbox, and an id is written into it immediately before that mark is yielded — never for a
   whole batch. Claiming the inbox up front would lose every mark after the first if the
   chat stopped between turns: still in the inbox, already counted as answered.
+- **A claim is a lease, not a tombstone.** The claim carries the time it was made, and one
+  older than `CLAIM_TTL_SECONDS` stops counting. A claim written for a turn that never ran
+  — the chat was killed between the claim and the yield — would otherwise hide that mark
+  from every later chat: still in the inbox, and skipped for ever.
 - **A stamp is not an identity.** Stamps are good to the second, so two marks made together
   share one. The id is `store.mark_id(line)` — a hash of the mark's own words — so two
   passages marked in the same second stay two marks, and retiring one leaves the other.
@@ -30,12 +39,16 @@ import asyncio
 import json
 import os
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from board import config, store
 
 INBOX_NAME = "inbox.md"
 LEDGER_NAME = "nudge.json"
+# Ten minutes: longer than any turn this trigger starts, and short enough that a chat killed
+# mid-turn costs a repeat rather than a mark.
+CLAIM_TTL_SECONDS = 600.0
 
 
 @dataclass(frozen=True)
@@ -110,43 +123,112 @@ def _read_mark_line(line: str) -> Mark | None:
     )
 
 
-def claimed_ids(meta: Path) -> set[str]:
-    """The marks a turn has already been spent on. An unreadable ledger costs a repeat."""
+def _now() -> datetime:
+    """The clock claims are compared against, aware like the stamps the inbox writes."""
+    return datetime.now().astimezone()
+
+
+def _made_at(stamp: str | None) -> datetime | None:
+    """When a stamp says something happened, or `None` when nothing can read it."""
+    if not stamp:
+        return None
+    try:
+        made = datetime.fromisoformat(stamp)
+    except ValueError:
+        return None
+    return made if made.tzinfo else made.astimezone()
+
+
+def quiet_for(meta: Path) -> float:
+    """Seconds since the newest mark was made — infinite when the inbox holds none.
+
+    From the newest, not from the oldest unclaimed: somebody adding a third mark has not
+    finished the first two, so the whole queue waits for them. A stamp nothing can read is
+    left out rather than holding the queue for ever.
+    """
+    newest = None
+    for mark in read_inbox_marks(meta):
+        made = _made_at(mark.stamp)
+        if made is not None and (newest is None or made > newest):
+            newest = made
+    if newest is None:
+        return float("inf")
+    return (_now() - newest).total_seconds()
+
+
+def _ledger(meta: Path) -> dict[str, datetime]:
+    """The ids a turn has been spent on, and when. An unreadable ledger costs a repeat."""
     path = meta / LEDGER_NAME
     if not path.is_file():
-        return set()
+        return {}
     try:
-        return set(json.loads(path.read_text(encoding="utf-8")).get("claimed", []))
-    except (ValueError, OSError):
-        return set()
+        claims = json.loads(path.read_text(encoding="utf-8")).get("claimed", {})
+    except (ValueError, OSError, AttributeError):
+        return {}
+    if isinstance(claims, list):
+        # Written before a claim carried its time. Trust it once: the next write dates it.
+        claims = dict.fromkeys(claims)
+    return {identity: _made_at(when) or _now() for identity, when in claims.items()}
 
 
-def next_unread_mark(meta: Path) -> Mark | None:
-    """The oldest mark nobody has answered, claimed in the ledger before it is handed over.
+def _live_claims(meta: Path) -> dict[str, datetime]:
+    """Claims still worth keeping: not expired, and about a line still in the inbox.
 
-    One at a time, on purpose. The ledger entry goes in immediately before this mark's own
-    turn is yielded, so a chat that stops between turns loses nothing: every mark after this
-    one is still unclaimed, and this one is still visible in the inbox to be mended by hand.
+    Dropping the retired ones keeps the ledger the size of the queue rather than the size of
+    every mark ever made — and it is what lets a mark identical to a retired one be answered
+    later instead of being skipped by an id left over from the one before it.
+    """
+    inbox = {mark.id for mark in read_inbox_marks(meta)}
+    now = _now()
+    lease = timedelta(seconds=CLAIM_TTL_SECONDS)
+    return {
+        identity: when
+        for identity, when in _ledger(meta).items()
+        if identity in inbox and now - when < lease
+    }
+
+
+def claimed_ids(meta: Path) -> set[str]:
+    """The marks a turn is live on: claimed, and not older than the lease."""
+    return set(_live_claims(meta))
+
+
+def next_unread_mark(meta: Path, settle: float | None = None) -> Mark | None:
+    """The oldest mark nobody is answering, claimed in the ledger before it is handed over.
+
+    Two refusals before anything is taken:
+
+    - **marking has to have stopped** — nothing is claimed while the newest mark is younger
+      than *settle* seconds, which defaults to `config.nudge_settle()`. A selection made a
+      moment ago may be one of three, and answering the first while the second is being
+      dragged is the interruption this feature is supposed to save somebody from.
+    - **a claim has to be live to count** — a claim is a lease and expires, so a chat killed
+      between claiming a mark and running its turn leaves the mark answerable.
 
     Two lines with identical words share an id, and therefore count as one mark. That is the
-    one thing the words cannot tell apart — and two identical marks are one intention.
+    one thing the words cannot tell apart — and `store.notify` refuses to write the same mark
+    twice inside a couple of seconds, so the queue does not hold two of them.
     """
-    claimed = claimed_ids(meta)
+    settle = config.nudge_settle() if settle is None else settle
+    if quiet_for(meta) < settle:
+        return None
+    claims = _live_claims(meta)
     for mark in read_inbox_marks(meta):
-        if mark.id in claimed:
+        if mark.id in claims:
             continue
-        claimed.add(mark.id)
-        write_ledger(meta, claimed)
+        claims[mark.id] = _now()
+        write_ledger(meta, claims)
         return mark
     return None
 
 
-def write_ledger(meta: Path, claimed: set[str]) -> None:
+def write_ledger(meta: Path, claims: dict[str, datetime]) -> None:
     """Replace the ledger atomically: a reader never sees half a file."""
     meta.mkdir(parents=True, exist_ok=True)
     path = meta / LEDGER_NAME
     temporary = path.with_name(f"{LEDGER_NAME}.tmp")
-    temporary.write_text(json.dumps({"claimed": sorted(claimed)}, indent=2), encoding="utf-8")
+    payload = {"claimed": {identity: when.isoformat() for identity, when in sorted(claims.items())}}
+    temporary.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     os.replace(temporary, path)
 
 
@@ -165,16 +247,17 @@ async def board_nudge():
         await asyncio.sleep(config.nudge_every())
 
 
-def _claim_in_order(meta: Path, enabled=config.nudge_enabled):
+def _claim_in_order(meta: Path, enabled=config.nudge_enabled, settle: float | None = None):
     """Claim marks one at a time, asking *enabled* before each, until the inbox is empty.
 
     A generator of its own so the claim for each mark happens as that mark is reached —
     after the turn before it has finished, and never for marks that are only queued — and
     so the switch can stop the queue between two marks rather than after all of them.
+    `next_unread_mark` holds the same queue while marking is still going on.
     """
     while enabled():
         try:
-            mark = next_unread_mark(meta)
+            mark = next_unread_mark(meta, settle)
         except OSError:
             return  # no board folder yet is a wait, not a failure
         if mark is None:

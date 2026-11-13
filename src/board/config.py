@@ -21,6 +21,8 @@ Every setting is `$<prefix>_BOARD_<NAME>`:
     NUDGE   `1` lets a mark start a turn on its own; off by default
     NUDGE_EVERY
             seconds between looks at the inbox, 15 by default
+    NUDGE_SETTLE
+            seconds of no new marks before a turn starts, 30 by default
 
 The environment is read when the server starts, not when this module is
 imported, so a test can point `DOCS` at a temporary folder and a shell can
@@ -43,6 +45,9 @@ DEFAULT_PORT = 8765
 # Fifteen seconds: fast enough that a mark feels answered, slow enough that a mark made
 # while a turn is running is not read again and again for the length of that turn.
 DEFAULT_NUDGE_EVERY = 15.0
+# Thirty seconds of no new marks: long enough for a run of three marks made one after
+# another to finish, short enough that the answer still feels like a reply to what you did.
+DEFAULT_NUDGE_SETTLE = 30.0
 
 
 def env_name(setting: str, prefix: str | None = None) -> str:
@@ -99,6 +104,22 @@ def nudge_every() -> float:
         return float(said) if said else DEFAULT_NUDGE_EVERY
     except ValueError:
         return DEFAULT_NUDGE_EVERY
+
+
+def nudge_settle() -> float:
+    """How long marking has to have stopped before a turn starts, in seconds.
+
+    A mark is a selection somebody made a second ago and may be about to replace, or the
+    first of three. Answering it while the next one is still being dragged is an
+    interruption, not help, so the queue waits until nothing new has arrived for this long.
+    `0` means "answer the moment a mark lands", which is only right if marks come one at a
+    time and slowly.
+    """
+    said = env_get("NUDGE_SETTLE").strip()
+    try:
+        return float(said) if said else DEFAULT_NUDGE_SETTLE
+    except ValueError:
+        return DEFAULT_NUDGE_SETTLE
 
 
 def url() -> str:

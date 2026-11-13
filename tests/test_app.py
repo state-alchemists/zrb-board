@@ -269,3 +269,11 @@ def test_should_keep_a_marker_to_one_line_when_its_text_has_breaks(client):
     lines = client.get("/api/inbox").text.strip().splitlines()
     assert len(lines) == 1
     assert "not a mark" in lines[0]
+
+
+def test_should_take_one_mark_when_the_same_one_arrives_twice(client):
+    # A second press on a slow page is one intention, and two identical lines carry one
+    # identity — the board would count two marks and the trigger could only answer one.
+    for _ in range(2):
+        client.post("/api/inbox", json={"text": "board: 0001-one — the words I selected"})
+    assert len(client.get("/api/inbox").text.strip().splitlines()) == 1

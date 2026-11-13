@@ -166,17 +166,27 @@ cannot make an agent take a turn.
 
 The mechanism that can is zrb's trigger, and it is built. `board/nudge.py` yields one turn
 per unread mark, and `board/zrb_init.py` registers it on the chat task beside the seven
-tools. Three properties, each with a reason:
+tools. Five properties, each with a reason:
 
 - **Off unless `ZRB_BOARD_NUDGE` is set.** A program that starts turns on your behalf should
   be one you switched on. The switch is read at every look; the trigger is registered once,
   when the chat starts, so turning it on is a new chat.
+- **Nothing is claimed while marking is going on.** A mark is a selection made a second ago
+  and possibly the first of three, so the queue waits until no new mark has arrived for
+  `ZRB_BOARD_NUDGE_SETTLE` seconds — thirty by default, measured from the newest mark rather
+  than from the one about to be answered. Answering the first of a run while the second is
+  being dragged is the interruption the feature exists to avoid.
 - **One turn per mark, claimed one at a time.** A ledger of claimed ids in
   `.board/nudge.json`, written immediately before *that* mark's turn and never for a batch:
   claiming the inbox up front would lose every mark after the first if the chat stopped
   between turns — still in the inbox, already counted as answered. The id is a hash of the
   mark's own line (`store.mark_id`), because a stamp is good to the second and two marks made
   together share one; retiring an id leaves the mark beside it.
+- **A claim is a lease, not a tombstone.** Each claim carries the time it was made and stops
+  counting after ten minutes, and claims about lines no longer in the inbox are dropped. A
+  claim written for a turn that never ran — the chat was killed between the claim and the
+  yield — would otherwise hide that mark from every later chat, still in the inbox and
+  skipped for ever. A repeat is the cheaper failure.
 - **The inbox is read as a file, not over HTTP.** The trigger runs on the machine that holds
   the board, so a stopped server does not silence a mark.
 
