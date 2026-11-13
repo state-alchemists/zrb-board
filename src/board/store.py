@@ -337,9 +337,10 @@ class Store:
         folds one line per mark and `retire_marks` removes one per mark. Text handed
         in with a line break in it would therefore arrive as a mark and a half, and a
         second half that looks like a mark could be retired out from under the first.
-        The break goes; the words stay.
+        The line breaks go and nothing else does: the words are left as they were
+        written, spaces and tabs included.
         """
-        said = " ".join(text.split()) or "read the board"
+        said = " ".join(text.splitlines()).strip() or "read the board"
         stamp = datetime.now().astimezone().isoformat(timespec="seconds")
         entry = f"- {stamp} — {said}\n"
         with self._lock:

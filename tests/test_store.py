@@ -282,3 +282,9 @@ def test_should_keep_a_mark_to_one_line_however_its_text_is_written(store):
     assert len(store.inbox().strip().splitlines()) == 1
     assert store.retire_marks() == 1
     assert store.inbox() == ""
+
+
+def test_should_take_only_the_line_breaks_out_of_a_mark(store):
+    # The break is what breaks the inbox; the rest of the text is the caller's.
+    store.notify("board: 0001-one\turgent  please")
+    assert "board: 0001-one\turgent  please" in store.inbox()
