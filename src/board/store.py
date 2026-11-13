@@ -122,8 +122,12 @@ def mark_id(line: str) -> str:
     chose. What makes two marks different is their words, so the line's own text names it:
     nothing extra is written into the inbox for a person to read around, and nothing has to
     stay in step with the text, because it is the text.
+
+    Sixteen hex characters — sixty-four bits — rather than the eight the first version kept:
+    an id is short enough to read in a prompt either way, and the longer one makes an
+    accidental collision something that cannot happen to a queue this size.
     """
-    return hashlib.sha256(line.strip().encode("utf-8")).hexdigest()[:8]
+    return hashlib.sha256(line.strip().encode("utf-8")).hexdigest()[:16]
 
 
 def _repeats_newest(inbox: str, said: str, stamp: str) -> bool:
