@@ -122,6 +122,46 @@ button:hover {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
+/* A table is read across, and with nothing between the rows the eye loses the one it
+   was on. The header gets a heavier line under it, every row a light one, and
+   alternate rows a shade to carry the eye back to the left edge. Numbers are set
+   tabular, so a column of figures lines up instead of wandering. */
+#article table {
+  width: 100%;
+  margin: 0 0 1rem;
+  border-collapse: collapse;
+  font-size: 0.92rem;
+  line-height: 1.45;
+  font-variant-numeric: tabular-nums;
+}
+
+#article thead th {
+  padding: 0.45rem 0.6rem;
+  border-bottom: 2px solid #d5cec0;
+  vertical-align: bottom;
+  text-align: left;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #5b544b;
+}
+
+#article tbody td {
+  padding: 0.5rem 0.6rem;
+  border-bottom: 1px solid #e4e0d8;
+  vertical-align: top;
+}
+
+#article tbody tr:nth-child(even) td {
+  background: #f5f2ea;
+}
+
+/* A table wider than the column scrolls inside its own block rather than pushing
+   the page sideways. */
+#article .block:has(> table) {
+  overflow-x: auto;
+}
+
 #article .block {
   position: relative;
   scroll-margin-top: 4rem;
