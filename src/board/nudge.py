@@ -22,6 +22,11 @@ Six rules this file exists to keep:
   older than `CLAIM_TTL_SECONDS` stops counting. A claim written for a turn that never ran
   — the chat was killed between the claim and the yield — would otherwise hide that mark
   from every later chat: still in the inbox, and skipped for ever.
+- **One chat claims at a time.** Reading the inbox and writing the ledger is a
+  read-modify-write, and two chats on one board are two trigger loops: without a lock both
+  see the same mark unclaimed and both answer it. The claim runs under `daemon.only_one`,
+  the same advisory file lock that stops two `-d` starting two servers, and a chat that
+  finds it held takes the next look instead of waiting.
 - **A stamp is not an identity.** Stamps are good to the second, so two marks made together
   share one. The id is `store.mark_id(line)` — a hash of the mark's own words — so two
   passages marked in the same second stay two marks, and retiring one leaves the other.
@@ -42,10 +47,11 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from board import config, store
+from board import config, daemon, store
 
 INBOX_NAME = "inbox.md"
 LEDGER_NAME = "nudge.json"
+LEDGER_LOCK_NAME = "nudge.lock"
 # Ten minutes: longer than any turn this trigger starts, and short enough that a chat killed
 # mid-turn costs a repeat rather than a mark.
 CLAIM_TTL_SECONDS = 600.0
@@ -196,12 +202,16 @@ def claimed_ids(meta: Path) -> set[str]:
 def next_unread_mark(meta: Path, settle: float | None = None) -> Mark | None:
     """The oldest mark nobody is answering, claimed in the ledger before it is handed over.
 
-    Two refusals before anything is taken:
+    Three refusals before anything is taken:
 
     - **marking has to have stopped** — nothing is claimed while the newest mark is younger
       than *settle* seconds, which defaults to `config.nudge_settle()`. A selection made a
       moment ago may be one of three, and answering the first while the second is being
       dragged is the interruption this feature is supposed to save somebody from.
+    - **another chat must not be claiming** — the ledger is read, decided on, and written
+      back, so two trigger loops that did that at once would both see the same mark
+      unclaimed. The whole claim is held under one file lock, and a chat that finds it taken
+      looks again rather than waiting: the other chat is doing the same job.
     - **a claim has to be live to count** — a claim is a lease and expires, so a chat killed
       between claiming a mark and running its turn leaves the mark answerable.
 
@@ -212,21 +222,29 @@ def next_unread_mark(meta: Path, settle: float | None = None) -> Mark | None:
     settle = config.nudge_settle() if settle is None else settle
     if quiet_for(meta) < settle:
         return None
-    claims = _live_claims(meta)
-    for mark in read_inbox_marks(meta):
-        if mark.id in claims:
-            continue
-        claims[mark.id] = _now()
-        write_ledger(meta, claims)
-        return mark
+    with daemon.only_one(meta / LEDGER_LOCK_NAME) as mine:
+        if not mine:
+            return None  # another chat is claiming; this one looks again next time
+        claims = _live_claims(meta)
+        for mark in read_inbox_marks(meta):
+            if mark.id in claims:
+                continue
+            claims[mark.id] = _now()
+            write_ledger(meta, claims)
+            return mark
     return None
+
+
+def _temporary(path: Path) -> Path:
+    """A scratch name of this process's own: two chats must not write one temporary file."""
+    return path.with_name(f"{path.name}.{os.getpid()}.tmp")
 
 
 def write_ledger(meta: Path, claims: dict[str, datetime]) -> None:
     """Replace the ledger atomically: a reader never sees half a file."""
     meta.mkdir(parents=True, exist_ok=True)
     path = meta / LEDGER_NAME
-    temporary = path.with_name(f"{LEDGER_NAME}.tmp")
+    temporary = _temporary(path)
     payload = {"claimed": {identity: when.isoformat() for identity, when in sorted(claims.items())}}
     temporary.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     os.replace(temporary, path)

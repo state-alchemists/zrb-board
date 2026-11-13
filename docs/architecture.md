@@ -186,7 +186,10 @@ tools. Five properties, each with a reason:
   counting after ten minutes, and claims about lines no longer in the inbox are dropped. A
   claim written for a turn that never ran — the chat was killed between the claim and the
   yield — would otherwise hide that mark from every later chat, still in the inbox and
-  skipped for ever. A repeat is the cheaper failure.
+  skipped for ever. A repeat is the cheaper failure. The claim is taken under
+  `daemon.only_one`, the same advisory lock that stops two `-d` starting two servers: two
+  chats on one board are two trigger loops, and a read-modify-write without a lock answers
+  the same mark twice. A chat that finds the lock held looks again rather than waiting.
 - **The inbox is read as a file, not over HTTP.** The trigger runs on the machine that holds
   the board, so a stopped server does not silence a mark.
 

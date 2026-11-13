@@ -10,11 +10,12 @@ the second — as if it named one mark.
 
 import asyncio
 import json
+import os
 from datetime import datetime, timedelta
 
 import pytest
 
-from board import config, nudge, store
+from board import config, daemon, nudge, store
 
 MARK = "- 2026-11-08T12:44:56+07:00 — board: 0001-one — the words I selected"
 OTHER = "- 2026-11-08T12:44:56+07:00 — board: 0001-one — a second passage, same second"
@@ -275,3 +276,20 @@ def test_the_ledger_forgets_a_mark_it_retired(meta):
     assert nudge.next_unread_mark(meta) is not None
     written = json.loads((meta / nudge.LEDGER_NAME).read_text(encoding="utf-8"))
     assert len(written["claimed"]) == 1, "the ledger is the size of the queue, not of history"
+
+
+def test_a_second_chat_cannot_claim_what_the_first_is_claiming(meta):
+    # Reading the ledger and writing it back is not atomic on its own: two trigger loops
+    # would both see this mark unclaimed and answer it twice.
+    write_inbox(meta, MARK)
+    with daemon.only_one(meta / nudge.LEDGER_LOCK_NAME) as mine:
+        assert mine
+        assert nudge.next_unread_mark(meta) is None, "the other chat holds the claim"
+    assert nudge.next_unread_mark(meta) is not None, "and it is claimable once that chat is done"
+
+
+def test_the_ledger_is_written_under_a_name_only_this_chat_uses(meta):
+    # One shared `.board/nudge.json.tmp` would let two chats write the same file at once, or
+    # replace it from under each other.
+    temporary = nudge._temporary(meta / nudge.LEDGER_NAME)
+    assert str(os.getpid()) in temporary.name

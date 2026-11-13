@@ -219,7 +219,8 @@ Four things the trigger is careful about:
   marks made in the same second are still two marks, and retiring one leaves the other. A
   claim is a lease and not a tombstone — it carries the time it was made and expires after
   ten minutes, so a chat killed between claiming a mark and running its turn costs a repeat
-  rather than a mark
+  rather than a mark. The claim is taken under a file lock, so two chats on one board cannot
+  both answer the same mark
 - **the server need not be up** — the inbox is read as a file, so a mark left while the board
   is stopped still becomes a turn
 
