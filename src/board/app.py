@@ -16,7 +16,17 @@ from pydantic import BaseModel, Field
 
 from board import anchors, config, daemon, digest, quoting, render
 from board.render import Block
-from board.store import Doc, DocNotFound, INK_AUTHOR, RevConflict, Store
+from board.store import (
+    Doc,
+    DocExists,
+    DocNotFound,
+    HasOpenNotes,
+    INK_AUTHOR,
+    InvalidName,
+    RevConflict,
+    Store,
+    UnknownStamp,
+)
 
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -41,6 +51,11 @@ class WriteBody(BaseModel):
     rev: str
 
 
+class CreateBody(BaseModel):
+    name: str
+    markdown: str
+
+
 class AnnotationBody(BaseModel):
     block: str
     quote: str
@@ -52,6 +67,10 @@ class AnnotationBody(BaseModel):
 
 class InboxBody(BaseModel):
     text: str = ""
+
+
+class RetireBody(BaseModel):
+    upto: str = ""
 
 
 class NoteBody(BaseModel):
@@ -167,6 +186,49 @@ def _register_routes(app: FastAPI, store: Store) -> None:
             )
         return JSONResponse(content={"rev": doc.rev, "updated": doc.updated.isoformat()})
 
+    @app.post("/api/docs", status_code=201)
+    def create_document(body: CreateBody) -> JSONResponse:
+        """Add a document. A name already in use is a 409, never an overwrite.
+
+        `PUT` answers 404 for a name that is not here, so before this route the only
+        way to add a document was to write the file into `docs/` by hand -- which
+        skipped the name check, the exists check and the atomic write that
+        `store.create` is made of, for a caller the board is supposed to serve.
+        """
+        try:
+            doc = store.create(body.name, body.markdown)
+        except InvalidName:
+            raise HTTPException(
+                status_code=422,
+                detail=f"{body.name!r} is not a document name: letters, digits, dots, "
+                "dashes and underscores, starting with a letter or a digit, and never "
+                "a path out of docs/",
+            ) from None
+        except DocExists:
+            raise HTTPException(
+                status_code=409,
+                detail=f"a document named {body.name} is already here: read it, then "
+                "write with its revision rather than starting again over it",
+            ) from None
+        return JSONResponse(
+            status_code=201,
+            content={"rev": doc.rev, "updated": doc.updated.isoformat(timespec="seconds")},
+        )
+
+    @app.delete("/api/docs/{name}")
+    def delete_document(name: str) -> dict:
+        """Remove a document and its annotations together. 409 while a note is open."""
+        try:
+            return store.remove(name)
+        except (DocNotFound, InvalidName):
+            raise _not_found(name) from None
+        except HasOpenNotes as refusal:
+            raise HTTPException(
+                status_code=409,
+                detail=f"{name} still holds {refusal}: resolve or remove them first, or "
+                "the removal would take the questions with it",
+            ) from None
+
     @app.post("/api/docs/{name}/annotations", status_code=201)
     def add_annotation(name: str, body: AnnotationBody) -> dict:
         try:
@@ -254,6 +316,24 @@ def _register_routes(app: FastAPI, store: Store) -> None:
     def leave_marker(body: InboxBody) -> dict:
         store.notify(body.text)
         return {"ok": True}
+
+    @app.post("/api/inbox/retire")
+    def retire_markers(body: RetireBody = RetireBody()) -> dict:
+        """Retire the marks that have been dealt with, up to a stamp or all of them.
+
+        A mark is a queue entry nothing dequeued, so "×8" on a document meant eight
+        marks ever made. Retiring is its own request because reading the inbox is not
+        answering it: a mark cleared before its work is done is a reminder thrown away.
+        """
+        try:
+            return {"retired": store.retire_marks(body.upto)}
+        except UnknownStamp as refusal:
+            raise HTTPException(
+                status_code=422,
+                detail=f"{refusal} is not a timestamp the board writes: BoardState "
+                "prints the one each mark carries, and a stamp it cannot read would "
+                "otherwise retire the whole queue",
+            ) from None
 
 
 USAGE = """\

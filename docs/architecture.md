@@ -181,12 +181,15 @@ chat — where the work actually happens — has no address to push to.
 | `GET /api/docs/{name}` | markdown, rendered html, blocks, annotations with `resolved_block` and `orphaned` |
 | `GET /api/docs/{name}/state.md` | the text digest |
 | `PUT /api/docs/{name}` | `{markdown, rev}` → `{rev}` or `409 {rev, markdown}` |
+| `POST /api/docs` | `{name, markdown}` → `201 {rev}`, or `409` when the name is taken — never an overwrite |
+| `DELETE /api/docs/{name}` | the document and its notes together, or `409` while a note is still open |
 | `POST /api/docs/{name}/notes` | `{quote, note, author}` → the stored annotation, the quote rendered where it stands, or `422` saying why no block holds it |
 | `POST /api/docs/{name}/annotations` | `{block, quote, note, author, start, end}` |
 | `POST /api/docs/{name}/annotations/{id}/resolve` | close a note |
 | `DELETE /api/docs/{name}/annotations/{id}` | drop an annotation for good — what an orphan offers |
 | `PUT /api/docs/{name}/ink/{block}` | `{quote, strokes, author}` — replaces that author's ink on the block |
 | `GET`/`POST /api/inbox` | the marker |
+| `POST /api/inbox/retire` | `{upto}` → `{retired}` — a mark is a queue entry, and this is the dequeue |
 
 An annotation:
 

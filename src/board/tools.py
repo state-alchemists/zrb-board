@@ -5,7 +5,7 @@ not running costs a clear error at call time rather than a broken import at star
 the tools can live in the same tree as the routes they call -- a route that changes here
 changes its caller in the same diff.
 
-Nothing imports this module by itself. `board/zrb_init.py` registers the five tools with
+Nothing imports this module by itself. `board/zrb_init.py` registers the seven tools with
 zrb; the server (`board.app`) runs without zrb ever being installed.
 
 `BOARD_URL` overrides the address (the one `zrb-board` binds by default); `BOARD_AUTHOR`
@@ -158,10 +158,12 @@ def _is_note(annotation: dict) -> bool:
 def _marks_waiting(inbox: list[str]) -> list[str]:
     """One line per document still marked, the newest mark's time kept.
 
-    The marker is only ever appended to (`store.notify`) and nothing clears it, so the
-    folder holds every mark ever made. Cutting it to the last few lines loses the one
-    thing the list is for -- which documents are waiting -- because the newest marks can
-    all be on the same page. Folded by document, nothing waiting goes unseen.
+    The marker is only ever appended to (`store.notify`), and retiring is a separate
+    act a caller has to ask for (`store.retire_marks`), so an inbox nobody has retired
+    holds every mark ever made -- and then a document's count is marks made, not marks
+    waiting. Cutting it to the last few lines loses the one thing the list is for --
+    which documents are waiting -- because the newest marks can all be on the same
+    page. Folded by document, nothing waiting goes unseen.
     """
     waiting: dict[str, dict] = {}
     for line in inbox:
@@ -236,6 +238,29 @@ def BoardRead(name: str, source: bool = False, purpose: str = "") -> str:
     if not source:
         return _request("GET", _document_path(name, "/state.md"))[1]
     return _json("GET", _document_path(name))["markdown"]
+
+
+def BoardCreate(name: str, markdown: str, purpose: str = "") -> str:
+    """Add a new document to the board, under a name nothing else uses.
+
+    BoardWrite only replaces a document that is already there -- a name the board does
+    not know is a 404 -- so this is the one way to give a question a page.
+
+    Args:
+      name: The new document's name, e.g. `0013-what-a-release-must-carry`. Letters,
+        digits, dots, dashes and underscores, starting with a letter or a digit; a
+        name that could leave `docs/` is refused rather than written.
+      markdown: The complete text of the new document, starting with a `# title`.
+      purpose: One short phrase saying what this call is for, as zrb asks of every tool.
+        Nothing here reads it: it is declared so a call that fills it is not refused.
+    """
+    if not markdown.strip():
+        raise RuntimeError(
+            "[SYSTEM SUGGESTION] nothing created: a document with no text is a name "
+            "with nothing under it. Send the complete text, starting with a `# title`."
+        )
+    created = _json("POST", "/api/docs", {"name": name, "markdown": markdown})
+    return f"Created. {name} is now at rev {created['rev']}, updated {created['updated']}."
 
 
 def BoardWrite(name: str, markdown: str, rev: str, purpose: str = "") -> str:
@@ -331,3 +356,23 @@ def BoardResolveNote(name: str, note_id: str, purpose: str = "") -> str:
         _document_path(name, f"/annotations/{urllib.parse.quote(note_id)}/resolve"),
     )
     return f"Closed note {note_id} on {name}."
+
+
+def BoardRetireMarks(upto: str = "", purpose: str = "") -> str:
+    """Retire inbox marks that have been dealt with, so "waiting" means waiting.
+
+    A mark is only ever appended to, so BoardState counts every mark ever made: "×8"
+    on a document is eight marks, not eight still waiting. Retire them once the work
+    they asked for is done. It is a separate call on purpose -- reading the board is
+    not answering it, and a mark cleared too early is a reminder thrown away.
+
+    Args:
+      upto: The newest mark to retire, by the timestamp BoardState prints beside it;
+        every mark at or before that stamp goes with it. Empty retires every mark.
+      purpose: One short phrase saying what this call is for, as zrb asks of every tool.
+        Nothing here reads it: it is declared so a call that fills it is not refused.
+    """
+    retired = _json("POST", "/api/inbox/retire", {"upto": upto})["retired"]
+    if not retired:
+        return "Nothing retired: no mark in the inbox is at or before that time."
+    return f"Retired {retired} mark{'' if retired == 1 else 's'}. BoardState lists only what is left."

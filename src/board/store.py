@@ -43,6 +43,22 @@ class DocExists(BoardError):
     """A document by that name is already here."""
 
 
+class HasOpenNotes(BoardError):
+    """A document still holds a note nobody has closed, so it cannot be removed."""
+
+    def __init__(self, count: int) -> None:
+        super().__init__(f"{count} open note{'' if count == 1 else 's'}")
+        self.count = count
+
+
+class UnknownStamp(BoardError):
+    """A timestamp the board cannot read, so it cannot retire marks up to it."""
+
+    def __init__(self, stamp: str) -> None:
+        super().__init__(f"{stamp!r}")
+        self.stamp = stamp
+
+
 class RevConflict(BoardError):
     """The caller wrote from a stale revision; here is what is on disk now."""
 
@@ -73,6 +89,23 @@ def content_rev(markdown: str) -> str:
 
 def _now() -> str:
     return datetime.now().astimezone().isoformat(timespec="seconds")
+
+
+def _stamp(text: str) -> datetime | None:
+    """A timestamp the board writes, or None if it is not one it can read.
+
+    A stamp with no offset is read as local time, so everything this returns is aware
+    and two of them compare without a TypeError.
+    """
+    try:
+        return datetime.fromisoformat(text).astimezone()
+    except ValueError:
+        return None
+
+
+def _mark_stamp(line: str) -> datetime | None:
+    """The stamp one inbox line carries, of the shape `- <stamp> — <text>`."""
+    return _stamp(line.strip().removeprefix("- ").partition(" — ")[0])
 
 
 def _next_id(annotations: list[dict]) -> str:
@@ -151,6 +184,32 @@ class Store:
                 raise DocExists(name)
             self._atomic_write(path, markdown)
             return self.read(name)
+
+    def remove(self, name: str) -> dict:
+        """Remove a document together with its annotations.
+
+        Refused while a note is still open: someone asked a question about this text
+        and has not been answered, and a removal that took the note with it would
+        answer the question by making it unaskable. Ink does not hold it back -- a
+        drawing is not a question.
+
+        The meta file goes with the document. `.board/architecture.annotations.json`
+        sitting there with no document beside it is exactly what deleting one half
+        leaves behind.
+        """
+        with self._lock:
+            self.read(name)
+            open_notes = sum(
+                1
+                for annotation in self.annotations(name)
+                if annotation.get("kind", NOTE_KIND) == NOTE_KIND
+                and not annotation.get("resolved")
+            )
+            if open_notes:
+                raise HasOpenNotes(open_notes)
+            self._doc_path(name).unlink()
+            self._annotation_path(name).unlink(missing_ok=True)
+            return {"name": name, "removed": True}
 
     def annotations(self, name: str) -> list[dict]:
         path = self._annotation_path(name)
@@ -272,12 +331,51 @@ class Store:
         return self.inbox_path.read_text(encoding="utf-8")
 
     def notify(self, text: str) -> None:
-        """Leave a marker. It cannot wake the agent; it waits for the next turn."""
+        """Leave a marker. It cannot wake the agent; it waits for the next turn.
+
+        A mark is one line, because that is how the inbox is read: `_marks_waiting`
+        folds one line per mark and `retire_marks` removes one per mark. Text handed
+        in with a line break in it would therefore arrive as a mark and a half, and a
+        second half that looks like a mark could be retired out from under the first.
+        The line breaks go and nothing else does: the words are left as they were
+        written, spaces and tabs included.
+        """
+        said = " ".join(text.splitlines()).strip() or "read the board"
         stamp = datetime.now().astimezone().isoformat(timespec="seconds")
-        entry = f"- {stamp} — {text.strip() or 'read the board'}\n"
+        entry = f"- {stamp} — {said}\n"
         with self._lock:
             existing = self.inbox()
             self._atomic_write(self.inbox_path, existing + entry)
+
+    def retire_marks(self, upto: str = "") -> int:
+        """Retire the marks up to *upto*, or every mark when it is empty.
+
+        `notify` only ever appends, so a folder nothing retires holds every mark ever
+        made, and a document's "×8" means eight marks made rather than eight waiting.
+        Retiring is a separate, explicit act and not something a read does: reading is
+        not acting, and a mark cleared before its work is done is a reminder thrown
+        away.
+
+        A line whose stamp cannot be read is kept. A stamp that cannot be read at all
+        is refused, because the alternative is a typo retiring the whole queue.
+        """
+        cutoff = None
+        if upto:
+            cutoff = _stamp(upto)
+            if cutoff is None:
+                raise UnknownStamp(upto)
+        with self._lock:
+            kept: list[str] = []
+            retired = 0
+            for line in self.inbox().splitlines(keepends=True):
+                stamp = _mark_stamp(line)
+                if stamp is not None and (cutoff is None or stamp <= cutoff):
+                    retired += 1
+                    continue
+                kept.append(line)
+            if retired:
+                self._atomic_write(self.inbox_path, "".join(kept))
+            return retired
 
     def _doc_path(self, name: str) -> Path:
         if not NAME_PATTERN.match(name) or name.endswith(".md"):
