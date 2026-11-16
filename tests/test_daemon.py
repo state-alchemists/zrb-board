@@ -5,10 +5,13 @@ prove that `subprocess.Popen` was called and nothing about whether the child out
 caller.
 """
 
+import errno
 import os
 import signal
 import sys
 import time
+
+import pytest
 
 from board import app as app_module
 from board import daemon
@@ -34,6 +37,13 @@ def _alive(pid, seconds=2.0):
             return False
         time.sleep(0.05)
     return True
+
+
+def _sleeping(tmp_path):
+    """A process that outlives the call that started it -- the board's stand-in."""
+    return daemon.detach(
+        [sys.executable, "-c", "import time; time.sleep(30)"], tmp_path / "log"
+    )
 
 
 def test_should_start_a_process_with_no_terminal_of_its_own(tmp_path):
@@ -109,6 +119,176 @@ def test_should_leave_alone_a_pid_that_is_no_longer_the_board(tmp_path):
         assert daemon.running(pid), "it was not ours to kill, and it was not killed"
     finally:
         os.kill(pid, signal.SIGTERM)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Windows holds a handle, not a descriptor")
+def test_should_signal_the_pidfd_it_checked_when_the_system_has_one(tmp_path, monkeypatch):
+    # A pid can be reused between the check and the kill; a pidfd cannot be, because it names
+    # the process rather than its number. Where one is available the signal goes through it.
+    path = tmp_path / "board.pid"
+    pid = _sleeping(tmp_path)
+    daemon.write_pid(path, pid)
+    holder = os.open(os.devnull, os.O_RDONLY)  # a real descriptor, so closing it is honest
+    sent = []
+    monkeypatch.setattr(daemon.os, "pidfd_open", lambda number: holder, raising=False)
+    monkeypatch.setattr(
+        daemon.signal,
+        "pidfd_send_signal",
+        lambda fd, number: sent.append((fd, number)),
+        raising=False,
+    )
+    try:
+        said = daemon.stop(path)
+        assert sent == [(holder, signal.SIGTERM)], said
+    finally:
+        os.kill(pid, signal.SIGTERM)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Windows holds a handle, not a descriptor")
+def test_should_hold_the_process_before_it_reads_the_start_time(tmp_path, monkeypatch):
+    # Reading the start time first and holding the process afterwards would leave the window
+    # it is meant to close: the process can exit in between, and the descriptor then names its
+    # successor. The hold comes first, so the signal is committed to one process before
+    # anything is compared.
+    path = tmp_path / "board.pid"
+    pid = _sleeping(tmp_path)
+    expected = daemon.started_at(pid)
+    if expected is None:
+        pytest.skip("this system reports no start time, so there is nothing to compare")
+    path.write_text(f"{pid}\n{expected}\n", encoding="utf-8")
+    order = []
+    holder = os.open(os.devnull, os.O_RDONLY)
+    monkeypatch.setattr(
+        daemon.os, "pidfd_open", lambda number: order.append("held") or holder, raising=False
+    )
+    monkeypatch.setattr(
+        daemon.signal,
+        "pidfd_send_signal",
+        lambda fd, number: order.append("signalled"),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        daemon, "started_at", lambda number: order.append("compared") or expected
+    )
+    try:
+        daemon.stop(path)
+        assert order == ["held", "compared", "signalled"], order
+    finally:
+        os.kill(pid, signal.SIGTERM)
+
+
+def test_should_still_refuse_a_reused_pid_without_a_pidfd(tmp_path, monkeypatch):
+    # The fallback narrows the window; it must not widen what is let through it. A recorded
+    # identity that does not match the live process still refuses to stop, and signals nothing.
+    path = tmp_path / "board.pid"
+    pid = _sleeping(tmp_path)
+    monkeypatch.setattr(daemon.os, "pidfd_open", None, raising=False)
+    try:
+        path.write_text(f"{pid}\nbegan-somewhere-else\n", encoding="utf-8")
+        said = daemon.stop(path)
+        assert "Refused" in said, said
+        assert not path.exists(), "the stale file should still be cleared"
+        assert daemon.running(pid), "the fallback signalled something it had not checked"
+    finally:
+        os.kill(pid, signal.SIGTERM)
+
+
+def test_should_fall_back_to_the_number_when_the_kernel_has_no_pidfd(tmp_path, monkeypatch):
+    # A kernel older than 5.3 answers ENOSYS: there is no descriptor to be had, and the number
+    # is what is left. Falling back is an honest "this system has neither", not a pretend hold.
+    def no_pidfd(number):
+        raise OSError(errno.ENOSYS, "Function not implemented")
+
+    monkeypatch.setattr(daemon.os, "pidfd_open", no_pidfd, raising=False)
+    path = tmp_path / "board.pid"
+    pid = _sleeping(tmp_path)
+    daemon.write_pid(path, pid)
+    assert "Stopped" in daemon.stop(path)
+    assert not _alive(pid)
+
+
+@pytest.mark.skipif(
+    not hasattr(os, "pidfd_open"), reason="this system has no pidfd to hold the process with"
+)
+def test_should_stop_a_child_through_a_real_pidfd(tmp_path):
+    # The same stop the suite already makes, on a system where the hold is the real one.
+    path = tmp_path / "board.pid"
+    pid = _sleeping(tmp_path)
+    daemon.write_pid(path, pid)
+    assert "Stopped" in daemon.stop(path)
+    assert not _alive(pid)
+
+
+def test_should_ask_and_end_windows_through_one_handle(monkeypatch):
+    # Two handles are two lookups of the number, and the second can name a second process. The
+    # creation time is read, and TerminateProcess is called, on the handle OpenProcess
+    # returned -- the one thing `os.kill` cannot do there. The Win32 surface is mocked,
+    # because the machine running this has no kernel32 to call.
+    opened, asked, ended, closed = [], [], [], []
+
+    class FakeFileTime:
+        dwLowDateTime = 0
+        dwHighDateTime = 0
+
+    class FakeKernel32:
+        def OpenProcess(self, rights, inherit, pid):
+            opened.append((rights, pid))
+            return 700
+
+        def GetProcessTimes(self, handle, created, exited, kernel, user):
+            asked.append(handle)
+            created.dwLowDateTime = 42
+            return 1
+
+        def TerminateProcess(self, handle, code):
+            ended.append((handle, code))
+            return 1
+
+        def CloseHandle(self, handle):
+            closed.append(handle)
+            return 1
+
+    class FakeCtypes:
+        @staticmethod
+        def byref(value):
+            return value
+
+    class FakeWintypes:
+        @staticmethod
+        def FILETIME():
+            return FakeFileTime()
+
+    monkeypatch.setattr(
+        daemon, "_kernel32", lambda: (FakeCtypes, FakeWintypes, FakeKernel32())
+    )
+
+    held = daemon._hold_on_windows(4242)
+    assert held.identity() == "42"
+    held.terminate()
+    held.close()
+
+    rights = daemon.PROCESS_QUERY_LIMITED_INFORMATION | daemon.PROCESS_TERMINATE
+    assert opened == [(rights, 4242)], "more than one handle was opened for one process"
+    assert asked == [700], "the creation time was not read from the handle it was given"
+    assert ended == [(700, signal.SIGTERM)], "the kill went somewhere other than that handle"
+    assert closed == [700]
+
+
+def test_should_tell_a_refused_windows_handle_from_a_process_that_is_gone(monkeypatch):
+    # A handle that will not open is either a process that has gone or one that is not ours to
+    # end. Calling the second "gone" would have `stop` throw away the pid file of a board that
+    # is still serving.
+    class RefusingKernel32:
+        def OpenProcess(self, rights, inherit, pid):
+            return 0
+
+    monkeypatch.setattr(daemon, "_kernel32", lambda: (None, None, RefusingKernel32()))
+    monkeypatch.setattr(daemon, "_running_on_windows", lambda number: False)
+    with pytest.raises(ProcessLookupError):
+        daemon._hold_on_windows(4242)
+    monkeypatch.setattr(daemon, "_running_on_windows", lambda number: True)
+    with pytest.raises(PermissionError):
+        daemon._hold_on_windows(4242)
 
 
 def test_should_wait_for_the_process_to_go_before_reporting_stopped(tmp_path):
