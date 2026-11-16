@@ -14,6 +14,7 @@ rotation wrong.
 
 from __future__ import annotations
 
+import errno
 import os
 import signal
 import subprocess
@@ -297,6 +298,128 @@ def _created_at(handle) -> str | None:
     return str((created.dwHighDateTime << 32) | created.dwLowDateTime)
 
 
+class _Pinned:
+    """A process held open, so what is checked and what is signalled are the same object.
+
+    `stop` reads when the process began, compares that with what the pid file recorded, and
+    only then signals -- three separate looks at a *number*, with the process free to exit and
+    the number free to be handed to something else between any two of them. Holding the
+    process first is what closes that: the signal travels through the hold, and a hold names
+    a process rather than a number, so it cannot reach whoever took the number over.
+
+    The identity is still read by number, and that read can now be wrong in one direction
+    only. Once the held process is gone, its number may answer for its successor; the
+    comparison then refuses to stop, which is the safe answer, and nothing is signalled.
+    """
+
+    def __init__(self, pid: int) -> None:
+        self.pid = pid
+
+    def identity(self) -> str | None:
+        """When the held process began, as `write_pid` would have recorded it."""
+        return started_at(self.pid)
+
+    def terminate(self) -> None:
+        os.kill(self.pid, signal.SIGTERM)
+
+    def close(self) -> None:
+        """Let go. Where the hold is only the number, there is nothing to release."""
+
+
+class _PinnedByFd(_Pinned):
+    """Linux: a pidfd, which refers to the process rather than to its number."""
+
+    def __init__(self, pid: int, fd: int) -> None:
+        super().__init__(pid)
+        self.fd = fd
+
+    def terminate(self) -> None:
+        signal.pidfd_send_signal(self.fd, signal.SIGTERM)
+
+    def close(self) -> None:
+        os.close(self.fd)
+
+
+class _PinnedByHandle(_Pinned):
+    """Windows: one handle, opened once, asked and ended through.
+
+    It is opened for both jobs at once -- to read the creation time and to end the process --
+    because a handle opened later for the kill would be a second lookup of the number, and a
+    second lookup can name a second process. `os.kill` opens one of its own.
+    """
+
+    def __init__(self, pid: int, handle) -> None:
+        super().__init__(pid)
+        self.handle = handle
+
+    def identity(self) -> str | None:
+        return _created_at(self.handle)
+
+    def terminate(self) -> None:
+        ctypes, _, kernel32 = _kernel32()
+        # The exit code is the signal number, which is what `os.kill` on Windows handed to
+        # `TerminateProcess`: the same death, through the handle that was already checked.
+        if not kernel32.TerminateProcess(self.handle, signal.SIGTERM):
+            raise ctypes.WinError(ctypes.get_last_error())
+
+    def close(self) -> None:
+        _kernel32()[2].CloseHandle(self.handle)
+
+
+def _pinned(pid: int) -> _Pinned:
+    """Hold *pid*'s process in whatever way this system offers.
+
+    - **Linux** has `pidfd_open`, and `pidfd_send_signal` to signal through the descriptor it
+      returns. Both are stdlib since Python 3.9 and need Linux 5.3; a kernel without them
+      answers `ENOSYS`, and the number is all that is left. The issue behind this was written
+      while neither was exposed to Python, when the two syscalls had to be made by hand.
+    - **Windows** has `OpenProcess`, a handle that keeps the process object alive and names
+      it, so the creation time and the kill are asked of one handle.
+    - **macOS** has neither: `proc_pidinfo` and `kill` are two lookups of the same number,
+      with nothing to show they are the same process. `stop` does the comparison and the
+      signal back to back, which narrows the window and does not close it. Closing it would
+      take a pidfd, and Darwin has none.
+
+    Raises `ProcessLookupError` when the process has already gone -- a pid file left by a
+    crash -- and any other `OSError` it cannot work around, such as a full descriptor table.
+    `stop` reports both rather than falling back to a signal it cannot vouch for.
+    """
+    if os.name == "nt":
+        return _hold_on_windows(pid)
+    fd = _pidfd(pid)
+    return _Pinned(pid) if fd is None else _PinnedByFd(pid, fd)
+
+
+def _pidfd(pid: int) -> int | None:
+    """A descriptor referring to *pid*'s process, or None where this system has none."""
+    open_fd = getattr(os, "pidfd_open", None)
+    if open_fd is None or not hasattr(signal, "pidfd_send_signal"):
+        return None
+    try:
+        return open_fd(pid)
+    except OSError as refusal:
+        if refusal.errno == errno.ENOSYS:
+            return None  # a kernel older than 5.3: it has no pidfd to give
+        raise
+
+
+def _hold_on_windows(pid: int) -> _PinnedByHandle:
+    """Open the one handle `stop` will ask and end through.
+
+    A handle that will not open means one of two things, and they are worth telling apart:
+    the process is gone, or it is there and not ours to end. Separating them costs one more
+    handle, and only on the way out -- but saying "gone" about a board that is still serving
+    would have `stop` delete a pid file it should have left alone.
+    """
+    kernel32 = _kernel32()[2]
+    handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE, False, pid)
+    if handle:
+        return _PinnedByHandle(pid, handle)
+    if _running_on_windows(pid):
+        raise PermissionError(errno.EACCES, f"not allowed to stop pid {pid}")
+    raise ProcessLookupError(errno.ESRCH, f"no process {pid}")
+
+
 def write_pid(path: Path, pid: int) -> None:
     """Write the pid, and what the system says its process began, for `stop` to check."""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -323,34 +446,39 @@ def _forget(path: Path, pid: int) -> None:
         path.unlink(missing_ok=True)
 
 
+def _gone(path: Path, pid: int) -> str:
+    """Forget a pid file whose process is not there, and say so."""
+    _forget(path, pid)
+    return f"Nothing to stop: pid {pid} is gone; removed the stale pid file."
+
+
 def stop(path: Path) -> str:
     """Stop the process named in *path*, and say what happened.
 
     SIGTERM, which uvicorn turns into a clean shutdown on POSIX. Windows has no signals to
-    send, so `os.kill` there terminates the process instead -- which is safe here because
-    every write the board does is a rename into place, so a process killed mid-sentence
+    send, so the process is ended with `TerminateProcess` instead -- which is safe here
+    because every write the board does is a rename into place, so a process ended mid-sentence
     leaves either the old file or the new one.
 
     Two things this does that a bare `kill` does not. It waits for the process to go, so
     `stop && zrb-board -d` starts a board instead of finding the dying one still answering;
     and it checks that the pid is still the process the file was written for, because a pid
     left behind by a crash can be someone else's by the time this runs.
+
+    A check is only worth making if the signal cannot land anywhere else, so the process is
+    held first and signalled through the hold (`_pinned`): a pidfd on Linux, one handle on
+    Windows. **On macOS there is nothing to hold with** -- `proc_pidinfo` and `kill` are two
+    lookups of the same number -- so the comparison and the signal are done back to back, and
+    a window microseconds wide remains in which the process exits, the number is reused, and
+    the signal reaches whatever took it. That gap cannot be closed without a pidfd, which
+    Darwin does not have.
     """
     pid = read_pid(path)
     if pid is None:
         return "Nothing to stop: no pid file, so this board was not started with -d."
     if not running(pid):
-        _forget(path, pid)
-        return f"Nothing to stop: pid {pid} is gone; removed the stale pid file."
+        return _gone(path, pid)
     expected = read_identity(path)
-    current = started_at(pid)
-    if expected and current and expected != current:
-        path.unlink(missing_ok=True)
-        return (
-            f"Refused: pid {pid} began at {current}, and this file was written for the "
-            "process that began at "
-            f"{expected}. Nothing was signalled; the stale pid file was removed."
-        )
     if not expected:
         # No identity was recorded -- the child may have died before it could be read --
         # so there is nothing proving this pid is the board. Refusing to guess is the
@@ -361,10 +489,9 @@ def stop(path: Path) -> str:
             "nothing proves it is the board. It was not signalled; stop it by hand if you "
             "are sure."
         )
-    try:
-        os.kill(pid, signal.SIGTERM)
-    except OSError as failure:
-        return f"Could not stop pid {pid}: {failure}"
+    refused = _ended(path, pid, expected)
+    if refused is not None:
+        return refused
     for _ in range(100):
         if not running(pid) or _collected(pid):
             break
@@ -373,6 +500,35 @@ def stop(path: Path) -> str:
         return f"Signalled pid {pid}, but it is still running; left its pid file in place."
     _forget(path, pid)
     return f"Stopped pid {pid}."
+
+
+def _ended(path: Path, pid: int, expected: str) -> str | None:
+    """Hold the process, check it is still the one the file names, and signal it.
+
+    None means the signal went through a hold, which proves it reached the process the file
+    was written for. Anything else is the sentence `stop` reports instead of waiting.
+    """
+    try:
+        held = _pinned(pid)
+    except ProcessLookupError:
+        return _gone(path, pid)
+    except OSError as failure:
+        return f"Could not stop pid {pid}: {failure}"
+    try:
+        current = held.identity()
+        if current and expected != current:
+            path.unlink(missing_ok=True)
+            return (
+                f"Refused: pid {pid} began at {current}, and this file was written for the "
+                "process that began at "
+                f"{expected}. Nothing was signalled; the stale pid file was removed."
+            )
+        held.terminate()
+    except OSError as failure:
+        return f"Could not stop pid {pid}: {failure}"
+    finally:
+        held.close()
+    return None
 
 
 def _collected(pid: int) -> bool:
