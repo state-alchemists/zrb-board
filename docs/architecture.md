@@ -118,6 +118,14 @@ rather than guessed at. This is the whole of the agent's view of the board;
 screenshots are possible but lossy and expensive, and a picture of a paragraph
 teaches a language model less than the paragraph does.
 
+A note is placed by its **quote**, and a quote can stand in two places that are two
+different blocks: `**foo**` in a fence is those characters, the same source in a
+paragraph is a bold word. Both would anchor, so trying each until one fits cannot
+choose between them, and the quote does not carry the answer — the place the agent
+read it does. `BoardNote` therefore takes a hint: `near="b_b15c3c"`, a block id a
+note marker names, or `near=<line>`, counted from one in `source=True`. Without a
+hint the first occurrence is taken, and the answer says that it chose.
+
 ## 6. Two kinds of drawing, on purpose
 
 | | ink | diagram |
@@ -212,7 +220,7 @@ chat — where the work actually happens — has no address to push to.
 | `PUT /api/docs/{name}` | `{markdown, rev}` → `{rev}` or `409 {rev, markdown}` |
 | `POST /api/docs` | `{name, markdown}` → `201 {rev}`, or `409` when the name is taken — never an overwrite |
 | `DELETE /api/docs/{name}` | the document and its notes together, or `409` while a note is still open |
-| `POST /api/docs/{name}/notes` | `{quote, note, author}` → the stored annotation, the quote rendered where it stands, or `422` saying why no block holds it |
+| `POST /api/docs/{name}/notes` | `{quote, note, author, near}` → the stored annotation, the quote rendered where it stands, or `422` saying why no block holds it; `near` says which occurrence when the words stand twice |
 | `POST /api/docs/{name}/annotations` | `{block, quote, note, author, start, end}` |
 | `POST /api/docs/{name}/annotations/{id}/resolve` | close a note |
 | `DELETE /api/docs/{name}/annotations/{id}` | drop an annotation for good — what an orphan offers |

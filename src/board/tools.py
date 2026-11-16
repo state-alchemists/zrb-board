@@ -196,6 +196,42 @@ def _marks_waiting(inbox: list[str]) -> list[str]:
     return lines or ["(no marks waiting)"]
 
 
+def _other_places(lines: list[int]) -> str:
+    """`line 12`, or `lines 12 and 30`: where else the same words stand."""
+    if len(lines) == 1:
+        return f"line {lines[0]}"
+    return f"lines {', '.join(str(line) for line in lines[:-1])} and {lines[-1]}"
+
+
+def _which_occurrence(document: dict, near: str | int) -> str:
+    """The words after a note saying which of the quote's occurrences it landed on.
+
+    The board locates a quote at its first occurrence unless it is told otherwise, and two
+    occurrences are not always the same passage: `**foo**` in a fence and `**foo**` in a
+    paragraph are two blocks, and the quote fits both. The board says what it saw -- the
+    other lines the words stand at, and whether the hint decided anything -- and this turns
+    that into a sentence, because a note that picked between two in silence is a note on a
+    passage nobody asked about. An answer with nothing to report says nothing.
+    """
+    also = document.get("also_at") or []
+    missed = document.get("hint") == "missed"
+    if missed:
+        said = (
+            f"near={near!r} matched nothing: no block here has that id and no line it "
+            "names starts the quote, so this is the first place it stands"
+        )
+        tail = f"; it also appears at {_other_places(also)}" if also else ""
+        return f" ({said}{tail})"
+    if not also:
+        return ""
+    if document.get("hint") == "matched":
+        return f" (near= chose this one; the quote also appears at {_other_places(also)})"
+    return (
+        f" (the quote also appears at {_other_places(also)} — this is the first of them; "
+        "near= chooses another)"
+    )
+
+
 def BoardState(purpose: str = "") -> str:
     """Look at the board: the marks waiting, then every document on it.
 
@@ -312,7 +348,9 @@ def BoardWrite(name: str, markdown: str, rev: str, purpose: str = "") -> str:
     return f"Written. {name} is now at rev {written['rev']}, updated {written['updated']}."
 
 
-def BoardNote(name: str, quote: str, note: str, purpose: str = "") -> str:
+def BoardNote(
+    name: str, quote: str, note: str, near: str | int = "", purpose: str = ""
+) -> str:
     """Leave a note on a quoted passage, in the margin beside it.
 
     Use it for a remark about one paragraph -- a question, a correction, an objection --
@@ -325,15 +363,27 @@ def BoardNote(name: str, quote: str, note: str, purpose: str = "") -> str:
         hashes or a line break in the middle do not stop it. It has to be words one block
         holds whole; a quote that runs over two paragraphs is refused, not shortened.
       note: What to say about them.
+      near: Which occurrence, when the same words stand in more than one place -- the one
+        thing the quote cannot say for itself. `**foo**` in a fence and `**foo**` in a
+        paragraph are two blocks and the quote fits both, so the first is taken unless you
+        say otherwise. Give the block id a note marker in BoardRead names, e.g.
+        `b_1a2b3c4d5e`, or a line counted from 1 the way an editor counts it -- the line
+        the quote starts on, or any line of the block it is in, counted in
+        `BoardRead(source=True)`. A block id survives an edit made above it; a line does
+        not. What it cannot do is move the note to a passage that does not hold the quote:
+        the hint names one of the places the quote already stands. A hint that names
+        nothing gets the first occurrence, and the answer says it missed. Leave it out and
+        the answer says what else the note could have been about.
       purpose: One short phrase saying what this call is for, as zrb asks of every tool.
         Nothing here reads it: it is declared so a call that fills it is not refused.
     """
     document = _json(
         "POST",
         _document_path(name, "/notes"),
-        {"quote": quote, "note": note, "author": NOTE_AUTHOR},
+        {"quote": quote, "note": note, "author": NOTE_AUTHOR, "near": near},
     )
-    return f"Noted on block {document['block']}: {note}"
+    said = _which_occurrence(document, near)
+    return f"Noted on block {document['block']}: {note}{said}"
 
 
 def BoardResolveNote(name: str, note_id: str, purpose: str = "") -> str:
