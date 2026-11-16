@@ -112,7 +112,12 @@ def test_a_note_is_one_request_to_the_board(monkeypatch):
         (
             "POST",
             "/api/docs/0001-q/notes",
-            {"quote": "| foo | bar |", "note": "the row", "author": tools.NOTE_AUTHOR},
+            {
+                "quote": "| foo | bar |",
+                "note": "the row",
+                "author": tools.NOTE_AUTHOR,
+                "near": "",
+            },
         )
     ]
 
@@ -182,7 +187,7 @@ def test_the_purpose_is_sent_nowhere(monkeypatch):
     monkeypatch.setattr(tools, "_json", record)
     tools.BoardNote("0001-q", "foo", "the row", purpose="asking about foo")
     assert sent == [
-        {"quote": "foo", "note": "the row", "author": tools.NOTE_AUTHOR},
+        {"quote": "foo", "note": "the row", "author": tools.NOTE_AUTHOR, "near": ""},
     ]
 
 
@@ -222,3 +227,64 @@ def test_retiring_marks_says_how_many_went(monkeypatch):
     tools.BoardRetireMarks(id="a1b2c3d4")
     assert sent[-1] == ("POST", "/api/inbox/retire", {"upto": "", "id": "a1b2c3d4"})
     assert sent[-1] == ("POST", "/api/inbox/retire", {"upto": "", "id": "a1b2c3d4"})
+
+
+def _answer(monkeypatch, near="", **reported):
+    """What BoardNote says for a board that reported *reported* about the quote."""
+
+    def fake_json(method, path, payload=None):
+        return {"id": "a1", "block": "b_1", "quote": "**foo**", **reported}
+
+    monkeypatch.setattr(tools, "_json", fake_json)
+    return tools.BoardNote("0001-q", "**foo**", "the row", near=near)
+
+
+def test_a_note_on_a_quote_that_stands_once_says_nothing_about_others(monkeypatch):
+    assert _answer(monkeypatch, also_at=[], hint="") == "Noted on block b_1: the row"
+
+
+def test_a_note_that_picked_between_two_says_which_it_took(monkeypatch):
+    # No hint, so the board took the first occurrence -- and says so, because a note that
+    # silently picked one of two is a note on the passage nobody asked about.
+    assert _answer(monkeypatch, also_at=[12], hint="") == (
+        "Noted on block b_1: the row (the quote also appears at line 12 — this is the "
+        "first of them; near= chooses another)"
+    )
+    assert "at lines 12 and 30" in _answer(monkeypatch, also_at=[12, 30], hint="")
+
+
+def test_a_note_the_hint_decided_says_the_hint_decided(monkeypatch):
+    assert _answer(monkeypatch, also_at=[12], hint="matched") == (
+        "Noted on block b_1: the row (near= chose this one; the quote also appears at "
+        "line 12)"
+    )
+    # Nothing else to say when the hint chose the only place the words stand.
+    assert _answer(monkeypatch, also_at=[], hint="matched") == (
+        "Noted on block b_1: the row"
+    )
+
+
+def test_a_note_whose_hint_matched_nothing_says_it_missed(monkeypatch):
+    said = _answer(monkeypatch, near="b_beef", also_at=[12], hint="missed")
+    assert "near='b_beef' matched nothing" in said
+    assert "this is the first place it stands" in said
+    assert "also appears at line 12" in said
+    alone = _answer(monkeypatch, near=9, also_at=[], hint="missed")
+    assert alone.endswith("this is the first place it stands)")
+
+
+def test_the_hint_is_sent_with_note_and_author(monkeypatch):
+    sent = []
+
+    def fake_json(method, path, payload=None):
+        sent.append(payload)
+        return {"id": "a1", "block": "b_1"}
+
+    monkeypatch.setattr(tools, "_json", fake_json)
+    tools.BoardNote("0001-q", "**foo**", "the row", near="b_1a2b")
+    assert sent[0] == {
+        "quote": "**foo**",
+        "note": "the row",
+        "author": tools.NOTE_AUTHOR,
+        "near": "b_1a2b",
+    }
