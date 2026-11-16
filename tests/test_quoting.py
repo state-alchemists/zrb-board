@@ -145,3 +145,27 @@ def test_a_quote_that_stands_once_has_nothing_to_choose_between():
     only = next(b.id for b in render.render(doc).blocks if "once" in b.text)
     assert (placed.block, placed.words) == (only, "once")
     assert (placed.also_at, placed.hint) == ((), "")
+
+
+WRAPPED_TWICE = "# Q\n\nalpha\nbeta\n\nalpha\nbeta\n"
+
+
+def test_a_quote_copied_over_a_wrap_that_stands_twice_can_be_pointed_at():
+    # The quote is not in the source at all -- the paragraph is wrapped -- so there is no
+    # `find` position to choose between. The blocks that show the words are the places, and
+    # a hint names one of them exactly as it does for a quote the source holds twice.
+    blocks = render.render(WRAPPED_TWICE).blocks
+    first, second = blocks[1], blocks[2]
+    plain = quoting.placing(WRAPPED_TWICE, "alpha beta")
+    assert (plain.block, plain.also_at, plain.hint) == (first.id, (6,), "")
+    for hint in (second.id, 6, "6"):
+        placed = quoting.placing(WRAPPED_TWICE, "alpha beta", near=hint)
+        assert (placed.block, placed.words, placed.also_at, placed.hint) == (
+            second.id,
+            "alpha beta",
+            (3,),
+            "matched",
+        ), hint
+    # And a hint that names nothing still answers honestly about the first place.
+    missed = quoting.placing(WRAPPED_TWICE, "alpha beta", near=99)
+    assert (missed.block, missed.also_at, missed.hint) == (first.id, (6,), "missed")

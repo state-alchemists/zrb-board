@@ -29,9 +29,9 @@ from board import render
 class Placement:
     """Where a quote landed, and what else the same words could have meant.
 
-    `also_at` is the source line, counted from one, of every occurrence the note did *not*
-    take: empty for a quote that stands once, which is the only case that needs no saying.
-    `hint` is `""` when no hint was given, and otherwise whether the hint is what chose this
+    `also_at` is the source line, counted from one, where each other occurrence starts:
+    empty for a quote that stands once, which is the only case that needs no saying. `hint`
+    is `""` when no hint was given, and otherwise whether the hint is what chose this
     occurrence -- `"matched"` -- or named nothing here, so the first was taken instead.
     """
 
@@ -57,17 +57,17 @@ def locate(
 def placing(markdown: str, quote: str, near: str | int = "") -> Placement | str:
     """Where the quote lands, or a sentence saying why no block does.
 
-    *near* is a block id, or the line the quote starts on counted from one. It only ever
-    chooses between places the quote already stands: the word `foo` cannot be hinted onto a
-    paragraph that never held it.
+    *near* is a block id, or a line counted from one that belongs to one. It names a place,
+    and the occurrence at that place wins; it never creates one, so the word `foo` cannot be
+    hinted onto a paragraph that never held it.
     """
     if not quote.strip():
         return "A note needs a quote: the words it is about, copied from BoardRead."
     blocks = render.render(markdown).blocks
     places = _occurrences(markdown, quote)
     if not places:
-        # Already in the page's words: a selection, or a quote copied after a wrap.
-        return _placed(match(blocks, " ".join(quote.split())))
+        # Already in the page's words: a selection, or a quote copied over a wrap.
+        return _in_the_page(markdown, quote, blocks, near)
     chosen, hint = _chosen(markdown, places, blocks, near)
     words = _where_it_stands(markdown, chosen, quote, blocks)
     found = _landed(_line(markdown, chosen), words, blocks, hint)
@@ -75,6 +75,30 @@ def placing(markdown: str, quote: str, near: str | int = "") -> Placement | str:
         return found
     block, held = found
     return Placement(block, held, _other_lines(markdown, places, chosen), hint)
+
+
+def _in_the_page(
+    markdown: str, quote: str, blocks: list[render.Block], near: str | int
+) -> Placement | str:
+    """The quote in the page's own words, where there is no source occurrence to point at.
+
+    A selection, or a quote copied over a wrap, is not in the source at all -- so the places
+    it stands are the blocks whose text holds it, and those are what a hint chooses between.
+    Without one, `match` decides as it always has: the tightest block, which for two equal
+    paragraphs is the first.
+    """
+    needle = " ".join(quote.split())
+    found = match(blocks, needle)
+    if isinstance(found, str):
+        return found
+    chosen, held = found
+    holding = [one for one in blocks if needle in one.text]
+    named = _named(markdown, blocks, near)
+    landed = named if any(named is one for one in holding) else None
+    if landed is not None:
+        return Placement(landed.id, needle, _other_lines_of(holding, landed.id), "matched")
+    hint = "missed" if str(near).strip() else ""
+    return Placement(chosen, held, _other_lines_of(holding, chosen), hint)
 
 
 def _landed(
@@ -100,9 +124,9 @@ def _in_code(markdown: str, at: int, blocks: list[render.Block]) -> bool:
     return bool(holder and holder.code)
 
 
-def _placed(found: tuple[str, str] | str) -> Placement | str:
-    """`match`'s two answers in the shapes `placing` returns."""
-    return found if isinstance(found, str) else Placement(*found)
+def _other_lines_of(blocks: list[render.Block], chosen: str) -> tuple[int, ...]:
+    """The lines, counted from one, where the other blocks holding the words start."""
+    return tuple(block.line + 1 for block in blocks if block.id != chosen)
 
 
 def _occurrences(markdown: str, quote: str) -> list[int]:
@@ -125,34 +149,45 @@ def _chosen(
     """The occurrence the note takes, and what the hint had to do with it.
 
     No hint is the first occurrence, which is what every caller got before hints existed.
-    A hint that names one of the places takes that one. A hint that names nothing here is
-    the first occurrence again -- the note still has to land somewhere -- and the answer
+    A hint that names a block takes the first occurrence inside it. A hint that names
+    nothing -- no block with that id, or a block holding none of the occurrences -- is the
+    first occurrence again, because the note still has to land somewhere, and the answer
     says the hint missed rather than pretending it was heard.
     """
     hint = str(near).strip()
     if not hint:
         return places[0], ""
-    pointed = _pointed_at(markdown, places, blocks, hint)
-    return (places[0], "missed") if pointed is None else (pointed, "matched")
+    named = _named(markdown, blocks, hint)
+    if named is not None:
+        inside = [
+            at
+            for at in places
+            if _block_at(blocks, _line(markdown, at)) is named
+        ]
+        if inside:
+            return inside[0], "matched"
+    return places[0], "missed"
 
 
-def _pointed_at(
-    markdown: str, places: list[int], blocks: list[render.Block], hint: str
-) -> int | None:
-    """The occurrence *hint* names, or `None` when it names none of them.
+def _named(
+    markdown: str, blocks: list[render.Block], near: str | int
+) -> render.Block | None:
+    """The block *near* names: the one with that id, or the one the line belongs to.
 
-    A block id is matched against the block that owns the occurrence's line, so a quote
-    inside a fence belongs to the fence; digits are a line, counted from one, and only the
-    occurrence that starts on it counts. Anything else is a hint this cannot read.
+    A line is the block that owns it rather than only its first line, because a paragraph
+    wrapped over three lines is still one place and a caller may name any of them. A line
+    past the end of the document, and anything that is neither an id here nor a number, name
+    nothing -- which is what makes a hint honest about missing rather than nearly right.
     """
+    hint = str(near).strip()
+    if not hint:
+        return None
     if hint.isdigit():
-        line = int(hint)
-        return next((at for at in places if _line(markdown, at) + 1 == line), None)
-    for at in places:
-        holder = _block_at(blocks, _line(markdown, at))
-        if holder is not None and holder.id == hint:
-            return at
-    return None
+        line = int(hint) - 1
+        if not 0 <= line < len(markdown.splitlines()):
+            return None
+        return _block_at(blocks, line)
+    return next((block for block in blocks if block.id == hint), None)
 
 
 def _other_lines(markdown: str, places: list[int], chosen: int) -> tuple[int, ...]:

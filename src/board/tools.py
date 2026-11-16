@@ -367,13 +367,13 @@ def BoardNote(
         thing the quote cannot say for itself. `**foo**` in a fence and `**foo**` in a
         paragraph are two blocks and the quote fits both, so the first is taken unless you
         say otherwise. Give the block id a note marker in BoardRead names, e.g.
-        `b_1a2b3c4d5e`, or the line the quote starts on counted from 1, the way an editor
-        counts it -- the text to count in is `BoardRead(source=True)`. A block id survives
-        an edit made above it; a line does not. What it cannot do is move the note to a
-        passage that does not hold the quote: the hint names one of the places the quote
-        already stands. A hint that names nothing gets the first occurrence, and the answer
-        says it missed. Leave it out and the answer says what else the note could have
-        been about.
+        `b_1a2b3c4d5e`, or a line counted from 1 the way an editor counts it -- the line
+        the quote starts on, or any line of the block it is in, counted in
+        `BoardRead(source=True)`. A block id survives an edit made above it; a line does
+        not. What it cannot do is move the note to a passage that does not hold the quote:
+        the hint names one of the places the quote already stands. A hint that names
+        nothing gets the first occurrence, and the answer says it missed. Leave it out and
+        the answer says what else the note could have been about.
       purpose: One short phrase saying what this call is for, as zrb asks of every tool.
         Nothing here reads it: it is declared so a call that fills it is not refused.
     """
