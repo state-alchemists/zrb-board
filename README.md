@@ -157,7 +157,7 @@ shape itself is the argument.
 | `POST /api/docs` | `{name, markdown}` — 201 with the rev, 409 when the name is taken |
 | `PUT /api/docs/{name}` | `{markdown, rev}` — 409 with the current text on a stale rev |
 | `DELETE /api/docs/{name}` | the document and its notes together — 409 while a note is open |
-| `POST /api/docs/{name}/notes` | `{quote, note, author}` — locate the quote and store the note in one request |
+| `POST /api/docs/{name}/notes` | `{quote, note, author, near}` — locate the quote and store the note in one request; `near` picks the occurrence when the words stand twice |
 | `POST /api/docs/{name}/annotations` | `{block, quote, note, author, start, end}` |
 | `POST /api/docs/{name}/annotations/{id}/resolve` | close a note |
 | `PUT /api/docs/{name}/ink/{block}` | `{quote, strokes}` — replace the strokes drawn on one block |
@@ -176,7 +176,7 @@ the same diff. Nothing in the server imports them — `board.app` runs without z
 | `BoardRead` | one document as text: the view — `rev`, then each note beside the passage it is about — or, with `source=True`, the document's own markdown byte for byte, which is the text `BoardWrite` takes |
 | `BoardWrite` | the whole markdown back, stating the revision that was read; a stale revision writes nothing and returns the current text to merge into |
 | `BoardCreate` | a new document under a name nothing uses; a name that is taken is a 409, never an overwrite |
-| `BoardNote` | a note on a quoted passage — the quote is sent to the board, which renders it where it stands (a table row under its header, a link as its words) and returns the block and the words that block holds |
+| `BoardNote` | a note on a quoted passage — the quote is sent to the board, which renders it where it stands (a table row under its header, a link as its words) and returns the block and the words that block holds; a `near` hint says which occurrence when the same words stand twice, and the answer says when it had to choose |
 | `BoardResolveNote` | close a note by the id `BoardRead` shows; ink is refused, because there is nothing to close |
 | `BoardRetireMarks` | retire the marks the work is done for, up to a stamp or all of them — reading the inbox is not answering it |
 
