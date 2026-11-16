@@ -181,6 +181,12 @@ def _kernel32():
         ctypes.POINTER(wintypes.FILETIME),
         ctypes.POINTER(wintypes.FILETIME),
     ]
+    # The kill is declared here for the same reason as the rest: the handle it is given is the
+    # one `OpenProcess` returned, and an undeclared argument is converted as a C `int`, which
+    # a 64-bit handle does not fit in. The call then fails and the board it was meant to stop
+    # keeps running -- the opposite of what an undeclared signature usually costs.
+    kernel32.TerminateProcess.restype = wintypes.BOOL
+    kernel32.TerminateProcess.argtypes = [wintypes.HANDLE, wintypes.UINT]
     return ctypes, wintypes, kernel32
 
 

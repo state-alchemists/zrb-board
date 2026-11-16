@@ -274,6 +274,23 @@ def test_should_ask_and_end_windows_through_one_handle(monkeypatch):
     assert closed == [700]
 
 
+@pytest.mark.skipif(os.name != "nt", reason="kernel32 is only there on Windows")
+def test_should_declare_every_win32_call_that_takes_a_handle():
+    # A handle does not fit in a C `int`, and ctypes converts an undeclared argument as one:
+    # the call fails, and the first call to fail is the kill this module exists to make. Only
+    # the Windows job can ask this, so it skips wherever the DLL is not there -- which is why
+    # the mocked test above cannot catch it.
+    _ctypes, _wintypes, kernel32 = daemon._kernel32()
+    for name in (
+        "OpenProcess",
+        "CloseHandle",
+        "GetExitCodeProcess",
+        "GetProcessTimes",
+        "TerminateProcess",
+    ):
+        assert getattr(kernel32, name).argtypes, f"{name} takes a handle, and declares none"
+
+
 def test_should_tell_a_refused_windows_handle_from_a_process_that_is_gone(monkeypatch):
     # A handle that will not open is either a process that has gone or one that is not ours to
     # end. Calling the second "gone" would have `stop` throw away the pid file of a board that
