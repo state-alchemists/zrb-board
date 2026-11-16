@@ -592,8 +592,13 @@ function offsetsWithin(block, range) {
   return { start, end: start + range.toString().length };
 }
 
-function onSelection() {
+function onSelection(event) {
   if (state.editing || state.drawing) return;
+  /* The box's own controls are mouseups too, and this ran first: pressing "put it
+     down" emptied the page selection (the caret is in the box), so the note was
+     hidden before the click that follows could send it -- every note thrown away,
+     with nothing said. A press that lands in the box is not a new passage. */
+  if (event && event.target.closest && event.target.closest('#compose')) return;
   const selection = window.getSelection();
   const quote = selection ? selection.toString().trim() : '';
   if (!quote) return hideCompose();
@@ -601,9 +606,24 @@ function onSelection() {
   const block = selectionBlock(range);
   if (!block) return hideCompose();
   const { start, end } = offsetsWithin(block, range);
+  const passage = { mode: 'note', block: block.dataset.block, quote, start, end };
+  /* A second drag over the same words is the same note, so the words already typed
+     stay: opening the box again clears it, and a hand that touches the page before
+     reaching the button would otherwise wipe the sentence in progress. */
+  if (state.compose && samePassage(state.compose, passage)) return;
+  state.compose = passage;
   const rect = range.getBoundingClientRect();
-  state.compose = { mode: 'note', block: block.dataset.block, quote, start, end };
   showCompose(rect.left, rect.bottom, 'what do you want to say about this?');
+}
+
+function samePassage(current, next) {
+  return (
+    current.mode === next.mode &&
+    current.block === next.block &&
+    current.quote === next.quote &&
+    current.start === next.start &&
+    current.end === next.end
+  );
 }
 
 async function submitCompose() {
