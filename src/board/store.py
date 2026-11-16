@@ -43,6 +43,14 @@ class DocExists(BoardError):
     """A document by that name is already here."""
 
 
+class EmptyWrite(BoardError):
+    """A write that would replace a document's whole text with nothing."""
+
+    def __init__(self, name: str) -> None:
+        super().__init__(f"an empty write would replace all of {name}")
+        self.name = name
+
+
 class HasOpenNotes(BoardError):
     """A document still holds a note nobody has closed, so it cannot be removed."""
 
@@ -210,10 +218,22 @@ class Store:
         return Doc(name, markdown, content_rev(markdown), stamp)
 
     def write(self, name: str, markdown: str, rev: str) -> Doc:
+        """Replace a document's text, refusing the one write that loses all of it.
+
+        An empty write is what the page's own save button sent when it was pressed
+        outside edit mode: the editor is cleared when it closes, so the textarea it
+        read was empty, and the revision check could not catch it -- it named the
+        revision just read, so the write looked current. The agent's door has always
+        refused an empty document; this is the same refusal at the door the browser
+        uses. A document that is already empty may stay empty, because nothing is
+        lost by that.
+        """
         with self._lock:
             current = self.read(name)
             if current.rev != rev:
                 raise RevConflict(current.rev, current.markdown)
+            if current.markdown.strip() and not markdown.strip():
+                raise EmptyWrite(name)
             self._atomic_write(self._doc_path(name), markdown)
             return self.read(name)
 
