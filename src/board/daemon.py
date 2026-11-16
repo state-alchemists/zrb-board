@@ -28,6 +28,13 @@ PID_NAME = "board.pid"
 LOG_NAME = "board.log"
 LOCK_NAME = "board.lock"
 
+# What a Windows handle has to be allowed to do to be of use to `stop`: say when the process
+# began (`PROCESS_QUERY_LIMITED_INFORMATION`) and end it (`PROCESS_TERMINATE`). `STILL_ACTIVE`
+# is the exit code a process that has not exited reports.
+PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+PROCESS_TERMINATE = 0x0001
+STILL_ACTIVE = 259
+
 
 def pid_path(home: Path) -> Path:
     return home / PID_NAME
@@ -184,8 +191,6 @@ def _running_on_windows(pid: int) -> bool:
     dead one whose object another handle is still holding open.
     """
     ctypes, wintypes, kernel32 = _kernel32()
-    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-    STILL_ACTIVE = 259
     handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
     if not handle:
         return False
@@ -266,25 +271,30 @@ def started_at(pid: int) -> str | None:
 
 def _windows_started_at(pid: int) -> str | None:
     """The process's creation time, so a reused pid can be told from the original."""
-    ctypes, wintypes, kernel32 = _kernel32()
-    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+    kernel32 = _kernel32()[2]
     handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
     if not handle:
         return None
     try:
-        created, exited, kernel, user = (wintypes.FILETIME() for _ in range(4))
-        asked = kernel32.GetProcessTimes(
-            handle,
-            ctypes.byref(created),
-            ctypes.byref(exited),
-            ctypes.byref(kernel),
-            ctypes.byref(user),
-        )
-        if not asked:
-            return None
-        return str((created.dwHighDateTime << 32) | created.dwLowDateTime)
+        return _created_at(handle)
     finally:
         kernel32.CloseHandle(handle)
+
+
+def _created_at(handle) -> str | None:
+    """When the process behind *handle* began -- asked of the handle, not of the number."""
+    ctypes, wintypes, kernel32 = _kernel32()
+    created, exited, kernel, user = (wintypes.FILETIME() for _ in range(4))
+    asked = kernel32.GetProcessTimes(
+        handle,
+        ctypes.byref(created),
+        ctypes.byref(exited),
+        ctypes.byref(kernel),
+        ctypes.byref(user),
+    )
+    if not asked:
+        return None
+    return str((created.dwHighDateTime << 32) | created.dwLowDateTime)
 
 
 def write_pid(path: Path, pid: int) -> None:
