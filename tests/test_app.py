@@ -178,14 +178,14 @@ def test_should_refuse_a_note_whose_document_moved_while_it_was_placed(
     from board import app as app_module
 
     doc = store.create("0001-question", "# Q\n\nalpha\n")
-    real_locate = app_module.quoting.locate
+    real_placing = app_module.quoting.placing
 
-    def locating_through_an_edit(markdown, quote):
-        found = real_locate(markdown, quote)
+    def placing_through_an_edit(markdown, quote, near=""):
+        found = real_placing(markdown, quote, near)
         store.write("0001-question", "# Q\n\nbeta\n", doc.rev)
         return found
 
-    monkeypatch.setattr(app_module.quoting, "locate", locating_through_an_edit)
+    monkeypatch.setattr(app_module.quoting, "placing", placing_through_an_edit)
     refused = client.post(
         "/api/docs/0001-question/notes", json={"quote": "alpha", "note": "x"}
     )
@@ -299,3 +299,32 @@ def test_should_take_one_mark_when_the_same_one_arrives_twice(client):
     for _ in range(2):
         client.post("/api/inbox", json={"text": "board: 0001-one — the words I selected"})
     assert len(client.get("/api/inbox").text.strip().splitlines()) == 1
+
+
+def test_should_note_the_occurrence_a_hint_names(client, store):
+    # Two places hold the same source -- a fence and a paragraph -- and the quote alone
+    # cannot say which was meant. The caller says where it read it, and the answer says
+    # what that decided; the report is the answer's, not the annotation's.
+    store.create("0001-question", "# Q\n\n```\n**foo**\n```\n\n**foo** in prose\n")
+    blocks = client.get("/api/docs/0001-question").json()["blocks"]
+    fence, paragraph = ({block["text"]: block["id"] for block in blocks}["**foo**"],
+                        next(block["id"] for block in blocks if "prose" in block["text"]))
+
+    def noted(**hint):
+        return client.post(
+            "/api/docs/0001-question/notes",
+            json={"quote": "**foo**", "note": "here", "author": "tara", **hint},
+        ).json()
+
+    first = noted()
+    assert first["block"] == fence and first["also_at"] == [7] and first["hint"] == ""
+    second = noted(near=paragraph)
+    assert second["block"] == paragraph and second["also_at"] == [4]
+    assert second["hint"] == "matched"
+    missed = noted(near="b_0000000000")
+    assert missed["block"] == fence and missed["hint"] == "missed"
+
+    stored = client.get("/api/docs/0001-question").json()["annotations"]
+    assert len(stored) == 3
+    assert all("also_at" not in one and "hint" not in one for one in stored)
+    assert all(not one["orphaned"] for one in stored)

@@ -79,6 +79,9 @@ class NoteBody(BaseModel):
     quote: str = ""
     note: str = ""
     author: str = "agent"
+    # A block id or a line number, sent only by a caller that read the quote somewhere
+    # specific. An older board ignores it, which lands the note where it always did.
+    near: str | int = ""
 
 
 class InkBody(BaseModel):
@@ -283,23 +286,26 @@ def _register_routes(app: FastAPI, store: Store) -> None:
         write, so without the store held still, an edit could land between finding the
         passage and storing the note, and the note would name a block the page no longer
         has.
+
+        `near` chooses between the occurrences when the same words stand more than once;
+        what it decided travels back beside the stored note rather than inside it, because
+        the annotation is what the page resolves and this is an answer about one call.
         """
         with store.transaction():
             try:
                 doc = store.read(name)
             except DocNotFound:
                 raise _not_found(name) from None
-            found = quoting.locate(doc.markdown, body.quote)
+            found = quoting.placing(doc.markdown, body.quote, body.near)
             if isinstance(found, str):
                 # 422: the quote was read fine, it is the passage that cannot be anchored.
                 raise HTTPException(status_code=422, detail=found)
-            block, words = found
             try:
-                return store.add_annotation(
+                stored = store.add_annotation(
                     name,
                     {
-                        "block": block,
-                        "quote": words,
+                        "block": found.block,
+                        "quote": found.words,
                         "note": body.note,
                         "author": body.author,
                         "start": 0,
@@ -315,6 +321,7 @@ def _register_routes(app: FastAPI, store: Store) -> None:
                     detail="the document changed while the note was being placed; "
                     "read it again and retry",
                 ) from conflict
+            return {**stored, "also_at": list(found.also_at), "hint": found.hint}
 
     @app.get("/api/inbox", response_class=PlainTextResponse)
     def read_inbox() -> str:
