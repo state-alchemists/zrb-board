@@ -20,6 +20,7 @@ from board.store import (
     Doc,
     DocExists,
     DocNotFound,
+    EmptyWrite,
     HasOpenNotes,
     INK_AUTHOR,
     InvalidName,
@@ -176,6 +177,12 @@ def _register_routes(app: FastAPI, store: Store) -> None:
             doc = store.write(name, body.markdown, body.rev)
         except DocNotFound:
             raise _not_found(name) from None
+        except EmptyWrite as refusal:
+            raise HTTPException(
+                status_code=422,
+                detail=f"nothing written: {refusal}. Send the whole text, or remove the "
+                "document with a DELETE if emptying it is what you meant.",
+            ) from None
         except RevConflict as conflict:
             return JSONResponse(
                 status_code=409,

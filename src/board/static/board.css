@@ -330,6 +330,17 @@ body.editing #ink {
   display: none;
 }
 
+/* Saving means saving the editor, and the editor only exists while editing. A save
+   button that offers itself when there is nothing to save was pressed with a blank
+   editor behind it and wrote that blank over the document. */
+#save {
+  display: none;
+}
+
+body.editing #save {
+  display: inline-block;
+}
+
 body.editing #editor {
   display: block;
 }

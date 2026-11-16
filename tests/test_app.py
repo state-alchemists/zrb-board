@@ -55,6 +55,28 @@ def test_should_accept_a_write_that_names_the_current_revision(client, store):
     assert response.json()["rev"] != doc.rev
 
 
+def test_should_refuse_a_write_that_would_leave_the_document_empty(client, store):
+    """The page's own save button sent this: outside edit mode #editor is empty.
+
+    The revision named is the one just read, so the conflict check saw nothing wrong
+    and the whole document was replaced with nothing.
+    """
+    doc = store.create("0001-question", "# Q\n\ntext\n")
+    for emptied in ("", "\n\n   \n"):
+        response = client.put(
+            "/api/docs/0001-question", json={"markdown": emptied, "rev": doc.rev}
+        )
+        assert response.status_code == 422
+    assert store.read("0001-question").markdown == "# Q\n\ntext\n"
+
+
+def test_should_let_an_already_empty_document_stay_empty(client, store):
+    """The refusal is about what the write loses, not about emptiness itself."""
+    doc = store.create("0001-question", "")
+    response = client.put("/api/docs/0001-question", json={"markdown": "", "rev": doc.rev})
+    assert response.status_code == 200
+
+
 def test_should_serve_the_digest_as_plain_markdown(client, store):
     store.create("0001-question", "# Q\n\ntext\n")
     _note(client, "0001-question")

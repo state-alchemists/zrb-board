@@ -508,6 +508,11 @@ function setEditing(editing) {
 }
 
 async function save() {
+  /* #editor holds the document only while it is showing; setEditing(false) clears it.
+     Called outside edit mode this would read an empty textarea and write that over the
+     page, which is how a document got emptied. The button is hidden there too — this
+     is the second lock on the same door. */
+  if (!state.editing) return;
   const markdown = document.querySelector('#editor').value;
   const result = await request(`/api/docs/${state.name}`, {
     method: 'PUT',
