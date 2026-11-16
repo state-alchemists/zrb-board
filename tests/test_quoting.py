@@ -83,3 +83,65 @@ def test_an_empty_quote_is_refused():
 
 def test_a_quote_that_shows_no_words_is_refused():
     assert isinstance(quoting.locate("# Q\n\nBefore ![d](d.png) after\n", "![d](d.png)"), str)
+
+
+TWICE = "# Q\n\n```\n**foo**\n```\n\n**foo** in prose\n"
+
+
+def test_a_quote_that_stands_twice_takes_the_first_occurrence():
+    # The document from the issue: `**foo**` in a fence is those characters on the page,
+    # the same source in a paragraph is a bold word, so the two are different blocks and
+    # the quote fits both. Without a hint the first is taken, and `also_at` says so.
+    placed = quoting.placing(TWICE, "**foo**")
+    fence = next(block.id for block in render.render(TWICE).blocks if block.code)
+    assert (placed.block, placed.words) == (fence, "**foo**")
+    assert placed.also_at == (7,)
+    assert placed.hint == ""
+    # `locate` is the same answer in the shape callers had before hints existed.
+    assert quoting.locate(TWICE, "**foo**") == (fence, "**foo**")
+
+
+def test_a_hint_sends_the_quote_to_the_second_occurrence():
+    # The hint is the only thing that can decide it: both occurrences anchor, so trying
+    # each until one fits would stop at the fence every time.
+    paragraph = next(b for b in render.render(TWICE).blocks if "prose" in b.text)
+    placed = quoting.placing(TWICE, "**foo**", near=paragraph.id)
+    assert (placed.block, placed.words) == (paragraph.id, "foo")
+    assert placed.also_at == (4,)
+    assert placed.hint == "matched"
+
+
+def test_a_line_hint_picks_the_occurrence_that_starts_on_it():
+    # Counted from 1, which is how the answer names the other places -- and how an editor
+    # counts the source, so `near=7` and `near="7"` mean the same line.
+    paragraph = next(b for b in render.render(TWICE).blocks if "prose" in b.text)
+    for line in (7, "7"):
+        placed = quoting.placing(TWICE, "**foo**", near=line)
+        assert placed.block == paragraph.id and placed.hint == "matched"
+    assert quoting.placing(TWICE, "**foo**", near=4).words == "**foo**"
+
+
+def test_a_hint_that_names_nothing_takes_the_first_and_says_it_missed():
+    # A note still has to land somewhere, and the first occurrence is where it always
+    # landed; what changes is that the answer stops pretending the hint was heard.
+    fence = next(block.id for block in render.render(TWICE).blocks if block.code)
+    for nothing in ("b_0000000000", 99, "the paragraph about foo"):
+        placed = quoting.placing(TWICE, "**foo**", near=nothing)
+        assert (placed.block, placed.hint) == (fence, "missed"), nothing
+
+
+def test_a_hint_cannot_move_a_quote_onto_a_passage_that_does_not_hold_it():
+    # It chooses between places the quote already stands; it is not a way to write a note
+    # about one paragraph in another paragraph's words.
+    doc = "# Q\n\nalpha\n\nbeta\n"
+    alpha, beta = (block.id for block in render.render(doc).blocks[1:])
+    placed = quoting.placing(doc, "alpha", near=beta)
+    assert (placed.block, placed.hint) == (alpha, "missed")
+
+
+def test_a_quote_that_stands_once_has_nothing_to_choose_between():
+    doc = "# Q\n\nOnly once here.\n"
+    placed = quoting.placing(doc, "once")
+    only = next(b.id for b in render.render(doc).blocks if "once" in b.text)
+    assert (placed.block, placed.words) == (only, "once")
+    assert (placed.also_at, placed.hint) == ((), "")
