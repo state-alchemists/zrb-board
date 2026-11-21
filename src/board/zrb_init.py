@@ -36,6 +36,15 @@ from board.tools import (  # noqa: E402
     BoardWrite,
 )
 
+try:
+    from zrb.llm.capabilities.tool_call import auto_approve
+except ImportError:  # zrb < 4.0 keeps the tool_call unit at the top of zrb.llm
+    from zrb.llm.tool_call import auto_approve
+
+# Nothing to approve. Reading the board is reading a file; writing it is a sentence in a document
+# the user keeps for exactly this, and the tools already refuse the two things that need a person:
+# a write at a stale revision, and a note on words the document does not hold. A prompt per call
+# would be one prompt per paragraph of thinking out loud.
 for tool in (
     BoardState,
     BoardRead,
@@ -46,6 +55,7 @@ for tool in (
     BoardRetireMarks,
 ):
     llm_chat.append_tool(tool)
+    llm_chat.prepend_tool_policy(auto_approve(tool.__name__))
 
 # The nudge: a mark left in the browser can start a turn instead of waiting for one. It is
 # registered unconditionally and returns immediately unless `ZRB_BOARD_NUDGE` is set, so the

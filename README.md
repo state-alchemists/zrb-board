@@ -186,6 +186,10 @@ They are registered with zrb by `src/board/zrb_init.py`, which a shell points at
 export ZRB_INIT_SCRIPTS="$ZRB_INIT_SCRIPTS:$(zrb-board init-path)"
 ```
 
+Every one of them is auto-approved: reading a board is reading a file, and a write is a sentence in a
+document kept for it, with the calls that need a person already refused — a write at a stale
+revision, and a note on words the document does not hold.
+
 `BOARD_URL` overrides the address; without it the tools call the host and port the server
 binds (`ZRB_BOARD_HOST`, `ZRB_BOARD_PORT`). `BOARD_AUTHOR` signs a note, `agent` unless it
 is set. The tools read the marker folder as a whole and fold it by document, because
